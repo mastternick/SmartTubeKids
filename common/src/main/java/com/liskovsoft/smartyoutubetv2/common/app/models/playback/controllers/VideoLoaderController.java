@@ -174,6 +174,13 @@ public class VideoLoaderController extends BasePlayerController {
             return;
         }
 
+        // KIDS: daily limit reached or recommendations blocked -> stop after current video, no next
+        KidsModeController kidsController = getController(KidsModeController.class);
+        if (kidsController != null && kidsController.shouldStopAfterVideo()) {
+            kidsController.onVideoSessionEnd();
+            return;
+        }
+
         // Stop the playback if the user is browsing options or reading comments
         int playbackMode = getPlaybackMode();
         if (getAppDialogPresenter().isDialogShown() && !getAppDialogPresenter().isOverlay() && playbackMode != PlayerConstants.PLAYBACK_MODE_ONE) {

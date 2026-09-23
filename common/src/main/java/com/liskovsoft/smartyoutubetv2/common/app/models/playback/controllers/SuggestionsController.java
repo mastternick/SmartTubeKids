@@ -29,6 +29,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.BrowseProcessorManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.youtubeapi.service.YouTubeServiceManager;
 import io.reactivex.Observable;
@@ -385,7 +386,9 @@ public class SuggestionsController extends BasePlayerController {
         int groupIndex = -1;
         int suggestRows = -1;
 
-        if (GeneralData.instance(getContext()).isChildModeEnabled() || getPlayerTweaksData().isSuggestionsDisabled()) {
+        // KIDS: also hide suggestion rows when kids mode blocks recommendations
+        if (GeneralData.instance(getContext()).isChildModeEnabled() || getPlayerTweaksData().isSuggestionsDisabled()
+                || KidsModeData.instance(getContext()).isAutoNextBlocked()) {
             suggestRows = video.hasPlaylist() ? 1 : 0;
         }
 
