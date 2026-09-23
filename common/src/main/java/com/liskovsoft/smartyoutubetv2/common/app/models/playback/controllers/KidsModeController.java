@@ -228,7 +228,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         }
 
         // Show warning as a toast; also as player title overlay when playing
-        MessageHelpers.showMessage(getContext(), getContext().getString(R.string.kids_time_left, minutes));
+        MessageHelpers.showMessage(getContext(), getContext().getString(R.string.kids_time_left, String.valueOf(minutes)));
 
         if (getPlayer() != null && getPlayer().isEngineInitialized()) {
             getPlayer().showOverlay(true);
