@@ -40,6 +40,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     private boolean mWarned5;
     private boolean mWarned2;
     private boolean mWarned1;
+    private boolean mIsCalmExitInProgress; // KIDS: guard against double fade (onPlayEnd may fire twice)
 
     @Override
     public void onInit() {
@@ -100,8 +101,16 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
     @Override
     public void onVideoLoaded(Video item) {
+        // KIDS: a new video woke us up - clear any calm-exit black screen state
+        mIsCalmExitInProgress = false;
+        Activity activity = getActivity();
+        if (activity != null) {
+            KidsScreenHelper.clearPendingScreenOff();
+            KidsScreenHelper.hideBlackScreen(activity);
+        }
+
         // KIDS: apply user brightness override while the player is visible
-        KidsScreenHelper.applyBrightness(getActivity());
+        KidsScreenHelper.applyBrightness(activity);
     }
 
     @Override
@@ -154,6 +163,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * (playlist/browse) which stays black until the first key press.
      */
     public void onVideoSessionEnd() {
+        if (mIsCalmExitInProgress) {
+            return; // fade already running
+        }
+
+        mIsCalmExitInProgress = true;
+
         accumulatePlayTime();
 
         if (isTimeExpired()) {

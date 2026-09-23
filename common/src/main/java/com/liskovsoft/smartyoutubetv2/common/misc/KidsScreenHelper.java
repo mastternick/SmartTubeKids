@@ -108,6 +108,14 @@ public class KidsScreenHelper {
 
         final ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
 
+        if (decor.findViewWithTag(OVERLAY_TAG) != null) {
+            // KIDS: fade already running - don't stack overlays
+            if (onFaded != null) {
+                onFaded.run();
+            }
+            return;
+        }
+
         final View blackOverlay = new View(activity);
         blackOverlay.setTag(OVERLAY_TAG); // KIDS: same tag so a key press can clear it (embedded player case)
         blackOverlay.setBackgroundColor(0xFF000000);
