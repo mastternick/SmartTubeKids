@@ -769,9 +769,14 @@
     <string name="kids_timer_off">No limit</string>
     <string name="kids_calm_exit">Calm exit warnings</string>
     <string name="kids_calm_exit_desc">Show friendly warnings 5, 2 and 1 minute before time is up</string>
-    <string name="kids_pin">Change PIN</string>
+    <string name="kids_pin">PIN protection</string>
+    <string name="kids_pin_enable">Enable PIN</string>
+    <string name="kids_pin_enable_desc">Protect Kids Mode and all Settings with a PIN. Disabling takes effect immediately.</string>
+    <string name="kids_pin_set">Set/change PIN</string>
+    <string name="kids_pin_set_desc">Leave the field blank to remove the PIN completely</string>
     <string name="kids_enter_pin">Enter Kids Mode PIN</string>
     <string name="kids_set_pin">Set a PIN for Kids Mode</string>
+    <string name="kids_set_pin_blank_hint">Leave blank to remove PIN</string>
     <string name="kids_wrong_pin">Wrong PIN</string>
     <string name="kids_extend_time">Extend time</string>
     <string name="kids_time_left">Kids Mode: %s minute(s) of watching left</string>

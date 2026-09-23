@@ -32,6 +32,11 @@ public class SimpleEditDialog {
         showPassword(context, dialogTitle, defaultValue, onChange, null);
     }
 
+    // KIDS: password dialog with custom hint
+    public static void showPassword(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange) {
+        show(context, dialogTitle, dialogHint, defaultValue, onChange, null, true);
+    }
+
     public static void showPassword(Context context, String dialogTitle, String defaultValue, OnChange onChange, Runnable onDismiss) {
         show(context, dialogTitle, dialogTitle, defaultValue, onChange, onDismiss, true);
     }
