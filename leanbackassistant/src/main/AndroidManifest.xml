@@ -42,8 +42,9 @@
                 android:resource="@xml/searchable" />
         </activity>
 
+        <!-- KIDS: changed authority -->
         <provider android:name=".search.VideoContentProvider"
-                  android:authorities="org.smarttube"
+                  android:authorities="org.smarttubekids"
                   android:exported="true"
                   android:initOrder="1999999999"
                   tools:ignore="ExportedContentProvider" />
