@@ -23,6 +23,8 @@ public class KidsModeData {
     private boolean mBlockShorts;
     private boolean mBlockRecommendations; // no "next video" at end + no suggestion rows
     private boolean mCalmExit;             // show warnings before limit expires
+    private int mBrightnessPercent;        // KIDS: -1 = auto/system, 10..100 = override
+    private boolean mIsMenuProviderRegistered; // KIDS: one-time menu item activation
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -132,6 +134,31 @@ public class KidsModeData {
         persistData();
     }
 
+    // --- Brightness (KIDS) ---
+
+    /**
+     * @return -1 for auto (follow system), or 10..100 percent override.
+     */
+    public int getBrightnessPercent() {
+        return mBrightnessPercent;
+    }
+
+    public void setBrightnessPercent(int percent) {
+        mBrightnessPercent = percent;
+        persistData();
+    }
+
+    // --- Menu provider init flag (KIDS) ---
+
+    public boolean isMenuProviderRegistered() {
+        return mIsMenuProviderRegistered;
+    }
+
+    public void setMenuProviderRegistered(boolean registered) {
+        mIsMenuProviderRegistered = registered;
+        persistData();
+    }
+
     // --- Daily counters ---
 
     public String getDailyDate() {
@@ -183,12 +210,15 @@ public class KidsModeData {
         mDailyBonusMs         = Helpers.parseLong(split, 8, 0);
         // Migration from v1.0: if a PIN exists but the flag was never stored, keep protection on
         mIsPinEnabled         = Helpers.parseBoolean(split, 9, mPin != null && !mPin.isEmpty());
+        mBrightnessPercent    = Helpers.parseInt(split, 10, -1); // -1 = auto
+        mIsMenuProviderRegistered = Helpers.parseBoolean(split, 11, false);
     }
 
     private void persistData() {
         mAppPrefs.setData(KIDS_MODE_DATA,
                 Helpers.mergeData(mIsEnabled, mPin, mTimerMinutes,
                         mBlockShorts, mBlockRecommendations, mCalmExit,
-                        mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled));
+                        mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
+                        mIsMenuProviderRegistered));
     }
 }

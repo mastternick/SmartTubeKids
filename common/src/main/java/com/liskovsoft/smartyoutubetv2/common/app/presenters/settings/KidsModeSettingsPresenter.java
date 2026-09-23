@@ -1,6 +1,8 @@
 package com.liskovsoft.smartyoutubetv2.common.app.presenters.settings;
 
+import android.app.Activity;
 import android.content.Context;
+import com.liskovsoft.sharedutils.helpers.MessageHelpers; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.controllers.KidsModeController;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
@@ -8,6 +10,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
@@ -38,6 +41,84 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
 
     public static KidsModeSettingsPresenter instance(Context context) {
         return new KidsModeSettingsPresenter(context);
+    }
+
+    /**
+     * KIDS: quick controls for in-player dialogs: brightness percent + Kids Mode switch.
+     * Reused by the player menu provider and by the screen-dimming long-press dialog.
+     */
+    public void appendQuickControls(AppDialogPresenter dialogPresenter) {
+        appendBrightnessCategory(dialogPresenter);
+        appendQuickEnableSwitch(dialogPresenter);
+    }
+
+    /**
+     * KIDS: brightness in percent. Applies live while selecting.
+     */
+    private void appendBrightnessCategory(AppDialogPresenter dialogPresenter) {
+        List<OptionItem> options = new ArrayList<>();
+
+        options.add(UiOptionItem.from(
+                getContext().getString(R.string.kids_brightness_auto),
+                option -> {
+                    if (option.isSelected()) {
+                        applyBrightness(KidsScreenHelper.BRIGHTNESS_AUTO);
+                    }
+                },
+                mKidsData.getBrightnessPercent() == KidsScreenHelper.BRIGHTNESS_AUTO));
+
+        for (int percent : new int[] {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}) {
+            options.add(UiOptionItem.from(percent + "%",
+                    option -> {
+                        if (option.isSelected()) {
+                            applyBrightness(percent);
+                        }
+                    },
+                    mKidsData.getBrightnessPercent() == percent));
+        }
+
+        dialogPresenter.appendRadioCategory(getContext().getString(R.string.kids_brightness), options);
+    }
+
+    /**
+     * KIDS: enable/disable Kids Mode right from the player.
+     * Disabling requires the PIN when PIN protection is active.
+     */
+    private void appendQuickEnableSwitch(AppDialogPresenter dialogPresenter) {
+        dialogPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_mode_enable),
+                option -> {
+                    if (!option.isSelected() && mKidsData.isPinEnabled()) {
+                        // Ask for the PIN before turning Kids Mode off
+                        dialogPresenter.closeDialog();
+                        SimpleEditDialog.showPassword(
+                                getContext(),
+                                getContext().getString(R.string.kids_enter_pin),
+                                null,
+                                newValue -> {
+                                    if (Utils.passwordMatch(mKidsData.getPin(), newValue)) {
+                                        enableKidsMode(false);
+                                        MessageHelpers.showMessage(getContext(), R.string.kids_mode_disabled);
+                                        return true;
+                                    }
+                                    return false;
+                                });
+                    } else {
+                        enableKidsMode(option.isSelected());
+                        MessageHelpers.showMessage(getContext(),
+                                option.isSelected() ? R.string.kids_mode_enabled : R.string.kids_mode_disabled);
+                    }
+                },
+                mKidsData.isEnabled()));
+    }
+
+    private void applyBrightness(int percent) {
+        // KIDS: getContext() returns the current Activity when one is available
+        android.content.Context context = getContext();
+
+        if (context instanceof Activity) {
+            KidsScreenHelper.setBrightness((Activity) context, percent);
+        }
     }
 
     /**
@@ -75,6 +156,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendTimerCategory(settingsPresenter);
         appendCalmExitSwitch(settingsPresenter);
         appendExtendTimeCategory(settingsPresenter);
+        appendBrightnessCategory(settingsPresenter); // KIDS: brightness also in full settings
         appendPinCategory(settingsPresenter);
 
         settingsPresenter.showDialog(getContext().getString(R.string.kids_mode), onFinish);
@@ -231,6 +313,13 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         mKidsData.setEnabled(enable);
         syncSettingsPassword();
         refreshRestrictions();
+    }
+
+    /**
+     * KIDS: public entry used by the player menu provider (already PIN-checked there).
+     */
+    public void setEnabledFromPlayer(boolean enable) {
+        enableKidsMode(enable);
     }
 
     /**

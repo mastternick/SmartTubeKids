@@ -1,5 +1,7 @@
 package com.liskovsoft.smartyoutubetv2.common.app.models.playback.controllers;
 
+import android.app.Activity;
+
 import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
@@ -8,6 +10,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper;
 import com.liskovsoft.smartyoutubetv2.common.misc.TickleManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
@@ -81,8 +84,24 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // KIDS: daily limit already reached — don't start new videos
         if (isTimeExpired()) {
             showTimeUpMessage();
-            Utils.post(() -> PlaybackPresenter.instance(getContext()).forceFinish());
+            // KIDS: calm fade to black, then back to the previous screen (stays black)
+            final Activity activity = getActivity();
+            final PlaybackPresenter presenter = PlaybackPresenter.instance(getContext());
+            if (activity != null) {
+                KidsScreenHelper.fadeToBlack(activity, () -> {
+                    KidsScreenHelper.setPendingScreenOff();
+                    presenter.forceFinish();
+                });
+            } else {
+                Utils.post(presenter::forceFinish);
+            }
         }
+    }
+
+    @Override
+    public void onVideoLoaded(Video item) {
+        // KIDS: apply user brightness override while the player is visible
+        KidsScreenHelper.applyBrightness(getActivity());
     }
 
     @Override
@@ -131,7 +150,8 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
     /**
      * Called when the current video has ended and the session must stop.
-     * Shows a calm goodbye message (Calm Exit), then closes the player.
+     * KIDS Calm Exit: fade to black over ~2s, then return to the previous screen
+     * (playlist/browse) which stays black until the first key press.
      */
     public void onVideoSessionEnd() {
         accumulatePlayTime();
@@ -140,8 +160,20 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             showTimeUpMessage();
         }
 
-        if (getPlayer() != null) {
-            getPlayer().finishReally();
+        final Activity activity = getActivity();
+        final PlaybackPresenter presenter = PlaybackPresenter.instance(getContext());
+
+        Runnable returnToBrowse = () -> {
+            KidsScreenHelper.setPendingScreenOff();
+
+            // Go back to the previous view (browse/playlist) instead of exiting the app
+            presenter.forceFinish();
+        };
+
+        if (activity != null) {
+            KidsScreenHelper.fadeToBlack(activity, returnToBrowse);
+        } else {
+            returnToBrowse.run();
         }
     }
 

@@ -1145,6 +1145,9 @@ public class PlayerUIController extends BasePlayerController {
                 });
         settingsPresenter.appendRadioCategory(dimmingCategory.title, dimmingCategory.options);
         settingsPresenter.appendRadioCategory(category.title, category.options);
+        // KIDS: brightness in % + Kids Mode quick toggle inside the dimming dialog
+        com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.KidsModeSettingsPresenter
+                .instance(getContext()).appendQuickControls(settingsPresenter);
         settingsPresenter.showDialog(getContext().getString(R.string.screen_dimming));
     }
 

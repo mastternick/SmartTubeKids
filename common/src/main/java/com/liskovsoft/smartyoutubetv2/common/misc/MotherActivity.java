@@ -23,6 +23,7 @@ import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.views.ViewManager;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS (same package, import for clarity)
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
@@ -136,6 +137,13 @@ public class MotherActivity extends FragmentActivity {
         }
 
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            // KIDS: first key press wakes up from the calm-exit black screen (and consumes the key)
+            if (KidsScreenHelper.isBlackScreenShown(this)) {
+                KidsScreenHelper.hideBlackScreen(this);
+                KidsScreenHelper.clearPendingScreenOff();
+                return true;
+            }
+
             boolean isKeepScreenOff = mScreensaverManager.isScreenOff() && Helpers.equalsAny(event.getKeyCode(),
                     new int[]{KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN});
             if (!isKeepScreenOff) {
@@ -217,6 +225,14 @@ public class MotherActivity extends FragmentActivity {
         applyCustomConfig();
 
         applyFullscreenModeIfNeeded();
+
+        // KIDS: calm-exit black screen carries over between activities until first key press
+        if (KidsScreenHelper.consumePendingScreenOff()) {
+            KidsScreenHelper.showBlackScreen(this);
+        } else {
+            // KIDS: apply user brightness override (from the player menu)
+            KidsScreenHelper.applyBrightness(this);
+        }
 
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();
