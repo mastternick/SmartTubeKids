@@ -783,4 +783,9 @@
     <string name="kids_time_up">Kids Mode: time is up for today. See you tomorrow!</string>
     <string name="kids_shorts_blocked">Shorts are blocked in Kids Mode</string>
     <string name="kids_status">Today: %1$s of %2$s watched</string>
+    <string name="kids_brightness">Screen brightness</string>
+    <string name="kids_brightness_auto">Auto (system)</string>
+    <string name="kids_mode_settings">Kids Mode settings…</string>
+    <string name="kids_mode_enabled">Kids Mode enabled</string>
+    <string name="kids_mode_disabled">Kids Mode disabled</string>
 </resources>
