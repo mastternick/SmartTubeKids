@@ -1,13 +1,29 @@
-[<img src="images/badge_fdroid.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/app.smarttube.fdroid/)
-[<img src="images/badge_github.png" alt="Get it on GitHub" height="80">](https://github.com/yuliskov/SmartTube/releases)
+# SmartTube Kids
 
-# Important announcement about the app
+Un fork al [SmartTube](https://github.com/yuliskov/SmartTube) adaptat pentru copii mici (2+ ani).
 
-My development environment was infected by unknown malicious software, as a result of which a few builds may have been affected. Once the issue was detected, I secured everything with a full disk wipe, restored a clean setup, and now all builds are scanned with VirusTotal. The F-Droid version will also be verified before release.
+**Televizorul copilului. Regulile părintelui.**
 
-Public keys may have been compromised, which is why I am sharing this issue. You can download the new version and the new public key below, and instructions for restoring backups are provided.
+### Funcții Kids (în lucru)
+- **Kids Mode** în Settings, protejat cu PIN parental
+- Blocare **Shorts**
+- Fără recomandări la finalul clipului (ecranul rămâne gol, nu apar videoclipuri următoare)
+- Fără rânduri de sugestii la navigare
+- **Calm Exit Timer**: limită de timp (ex. 15 min) — clipul în curs se termină, apoi oprire blândă cu avertismente (-5/-2/-1 min), inspirat din conceptul Calm Exit Engine
 
-No extra actions are required since the app uses **one-time connection codes**. These codes have very limited permissions (for example, they cannot change your password). Still, you can revoke them if you want full peace of mind.
+### Credits / Based on
+Acest proiect este derivat din **[SmartTube](https://github.com/yuliskov/SmartTube)** de **yuliskov**, licențiat sub [MIT License](./LICENSE) (Copyright (c) 2020-present yuliskov). Toată funcționalitatea de bază (player, browsare, lipsa reclamelor) aparține proiectului original.
+
+Conceptul de ieșire calmă (Calm Exit) și control parental este inspirat din proiectul personal **Kids TV Cloud**.
+
+### Instalare
+APK-urile se construiesc automat prin GitHub Actions la fiecare push pe branch-ul `kids`:
+- Tab-ul **Actions** → ultimul workflow → Artifacts (arm64 / armeabi-v7a / universal)
+- Aplicația este separată de SmartTube oficial (applicationId `app.smarttubekids`) și poate coexista pe același dispozitiv.
+
+---
+
+# Documentația originală SmartTube
 
 # How to revoke access:
 
