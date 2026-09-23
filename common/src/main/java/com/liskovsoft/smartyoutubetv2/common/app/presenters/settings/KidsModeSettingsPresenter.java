@@ -2,10 +2,13 @@ package com.liskovsoft.smartyoutubetv2.common.app.presenters.settings;
 
 import android.content.Context;
 import com.liskovsoft.smartyoutubetv2.common.R;
+import com.liskovsoft.smartyoutubetv2.common.app.models.playback.controllers.KidsModeController;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
+import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
@@ -81,10 +84,10 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                         // Force PIN creation before enabling
                         settingsPresenter.closeDialog();
                         showSetPinDialog(() -> {
-                            mKidsData.setEnabled(true);
+                            enableKidsMode(true);
                         });
                     } else {
-                        mKidsData.setEnabled(option.isSelected());
+                        enableKidsMode(option.isSelected());
                     }
                 },
                 mKidsData.isEnabled()));
@@ -93,7 +96,10 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
     private void appendBlockShortsSwitch(AppDialogPresenter settingsPresenter) {
         settingsPresenter.appendSingleSwitch(UiOptionItem.from(
                 getContext().getString(R.string.kids_block_shorts),
-                option -> mKidsData.setBlockShorts(option.isSelected()),
+                option -> {
+                    mKidsData.setBlockShorts(option.isSelected());
+                    refreshRestrictions();
+                },
                 mKidsData.isBlockShorts()));
     }
 
@@ -156,7 +162,17 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                 null,
                 newValue -> {
                     if (newValue != null && !newValue.isEmpty()) {
+                        String oldPin = mKidsData.getPin();
                         mKidsData.setPin(newValue);
+
+                        // Keep the settings password in sync with the Kids PIN
+                        GeneralData generalData = GeneralData.instance(getContext());
+                        if (mKidsData.isEnabled()) {
+                            if (oldPin != null && oldPin.equals(generalData.getSettingsPassword())) {
+                                generalData.setSettingsPassword(newValue);
+                            }
+                        }
+
                         if (onSuccess != null) {
                             onSuccess.run();
                         }
@@ -164,5 +180,38 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                     }
                     return false;
                 });
+    }
+
+    /**
+     * KIDS: enable/disable Kids Mode. When enabled, the PIN also protects
+     * the whole Settings section (existing GeneralData settings password mechanism),
+     * so the child can't change any other setting to bypass Kids Mode.
+     */
+    private void enableKidsMode(boolean enable) {
+        mKidsData.setEnabled(enable);
+
+        GeneralData generalData = GeneralData.instance(getContext());
+
+        if (enable && mKidsData.hasPin()) {
+            generalData.setSettingsPassword(mKidsData.getPin());
+        } else if (!enable) {
+            // Only clear if it's our PIN (don't touch an unrelated settings password)
+            if (mKidsData.hasPin() && mKidsData.getPin().equals(generalData.getSettingsPassword())) {
+                generalData.setSettingsPassword(null);
+            }
+        }
+
+        refreshRestrictions();
+    }
+
+    /**
+     * KIDS: re-apply global content filters after any Kids Mode setting change.
+     */
+    private void refreshRestrictions() {
+        PlaybackPresenter playbackPresenter = PlaybackPresenter.instance(getContext());
+        KidsModeController controller = playbackPresenter != null ? playbackPresenter.getController(KidsModeController.class) : null;
+        if (controller != null) {
+            controller.applyRestrictions();
+        }
     }
 }

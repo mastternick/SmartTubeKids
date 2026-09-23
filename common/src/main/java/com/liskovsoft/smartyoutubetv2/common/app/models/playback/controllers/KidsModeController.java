@@ -1,14 +1,17 @@
 package com.liskovsoft.smartyoutubetv2.common.app.models.playback.controllers;
 
+import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.TickleManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
+import com.liskovsoft.youtubeapi.service.internal.MediaServiceData;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -39,6 +42,21 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     public void onInit() {
         mKidsData = KidsModeData.instance(getContext());
         TickleManager.instance().addListener(this);
+        applyRestrictions(); // KIDS: keep global content filters in sync with kids settings
+    }
+
+    /**
+     * KIDS: apply/remove global content restrictions driven by Kids Mode.
+     * Uses the same mechanisms as the built-in "hide shorts" settings.
+     */
+    public void applyRestrictions() {
+        if (mKidsData == null || getContext() == null) {
+            return;
+        }
+
+        boolean blockShorts = mKidsData.isBlockShortsActive();
+        MediaServiceData.instance().setContentHidden(MediaServiceData.CONTENT_SHORTS_ALL, blockShorts);
+        BrowsePresenter.instance(getContext()).enableSection(MediaGroup.TYPE_SHORTS, !blockShorts);
     }
 
     @Override
