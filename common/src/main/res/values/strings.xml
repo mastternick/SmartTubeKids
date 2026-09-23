@@ -756,4 +756,26 @@
         <item quantity="one">%s second</item>
         <item quantity="other">%s seconds</item>
     </plurals>
+
+    <!-- KIDS: Kids Mode strings (English base, translatable) -->
+    <string name="kids_mode">Kids Mode</string>
+    <string name="kids_mode_desc">Parental controls for young children: block Shorts, block recommendations, daily watch time limit with calm exit. Protected with a PIN.</string>
+    <string name="kids_mode_enable">Enable Kids Mode</string>
+    <string name="kids_block_shorts">Block Shorts</string>
+    <string name="kids_block_recommendations">Block recommendations</string>
+    <string name="kids_block_recommendations_desc">No next videos at the end of a clip, no suggestion rows</string>
+    <string name="kids_timer">Daily time limit</string>
+    <string name="kids_timer_desc">Current video always finishes, then playback stops</string>
+    <string name="kids_timer_off">No limit</string>
+    <string name="kids_calm_exit">Calm exit warnings</string>
+    <string name="kids_calm_exit_desc">Show friendly warnings 5, 2 and 1 minute before time is up</string>
+    <string name="kids_pin">Change PIN</string>
+    <string name="kids_enter_pin">Enter Kids Mode PIN</string>
+    <string name="kids_set_pin">Set a PIN for Kids Mode</string>
+    <string name="kids_wrong_pin">Wrong PIN</string>
+    <string name="kids_extend_time">Extend time</string>
+    <string name="kids_time_left">Kids Mode: %s minute(s) of watching left</string>
+    <string name="kids_time_up">Kids Mode: time is up for today. See you tomorrow!</string>
+    <string name="kids_shorts_blocked">Shorts are blocked in Kids Mode</string>
+    <string name="kids_status">Today: %1$s of %2$s watched</string>
 </resources>

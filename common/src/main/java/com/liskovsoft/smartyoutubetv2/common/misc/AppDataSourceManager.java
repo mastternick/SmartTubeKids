@@ -12,6 +12,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.BackupSetti
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.SponsorBlockSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.DeArrowSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.GeneralSettingsPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.KidsModeSettingsPresenter; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.LanguageSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.MainUISettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.PlayerSettingsPresenter;
@@ -49,6 +50,9 @@ public class AppDataSourceManager {
                 context.getString(R.string.settings_language_country), () -> LanguageSettingsPresenter.instance(context).show(), R.drawable.settings_language));
         settingItems.add(new SettingsItem(
                 context.getString(R.string.settings_general), () -> GeneralSettingsPresenter.instance(context).show(), R.drawable.settings_app));
+        // KIDS: Kids Mode entry (PIN-protected)
+        settingItems.add(new SettingsItem(
+                context.getString(R.string.kids_mode), () -> KidsModeSettingsPresenter.instance(context).show(), R.drawable.settings_app));
         settingItems.add(new SettingsItem(
                 context.getString(R.string.settings_main_ui), () -> MainUISettingsPresenter.instance(context).show(), R.drawable.settings_main_ui));
         settingItems.add(new SettingsItem(
