@@ -110,13 +110,23 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     /**
      * Called from VideoLoaderController.onPlayEnd (KIDS hook) via getController().
      * @return true if playback must NOT continue to the next video.
+     *
+     * Rule: explicit playlists chosen by the parent keep playing (a compilation
+     * shouldn't stop after every clip). Blocked recommendations only kill the
+     * auto-next from suggestions. Expired timer always stops.
      */
     public boolean shouldStopAfterVideo() {
         if (mKidsData == null || !mKidsData.isEnabled()) {
             return false;
         }
 
-        return mKidsData.isAutoNextBlocked() || isTimeExpired();
+        if (isTimeExpired()) {
+            return true;
+        }
+
+        Video video = getVideo();
+
+        return mKidsData.isAutoNextBlocked() && (video == null || !video.hasPlaylist());
     }
 
     /**
