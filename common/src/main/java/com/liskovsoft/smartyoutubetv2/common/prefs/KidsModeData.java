@@ -17,7 +17,8 @@ public class KidsModeData {
     private final AppPrefs mAppPrefs;
 
     private boolean mIsEnabled;
-    private String mPin;                   // null = no PIN set yet
+    private String mPin;                   // null = no PIN set
+    private boolean mIsPinEnabled;         // KIDS: PIN protection on/off (independent toggle)
     private int mTimerMinutes;             // 0 = no limit; >0 = daily watch limit
     private boolean mBlockShorts;
     private boolean mBlockRecommendations; // no "next video" at end + no suggestion rows
@@ -64,6 +65,19 @@ public class KidsModeData {
 
     public boolean hasPin() {
         return mPin != null && !mPin.isEmpty();
+    }
+
+    /**
+     * KIDS: PIN protection toggle. When disabled, no PIN is asked anywhere,
+     * even if a PIN value is still stored.
+     */
+    public boolean isPinEnabled() {
+        return mIsPinEnabled && hasPin();
+    }
+
+    public void setPinEnabled(boolean enabled) {
+        mIsPinEnabled = enabled;
+        persistData();
     }
 
     // --- Timer ---
@@ -167,12 +181,14 @@ public class KidsModeData {
         mDailyDate            = Helpers.parseStr(split, 6);
         mDailyUsedMs          = Helpers.parseLong(split, 7, 0);
         mDailyBonusMs         = Helpers.parseLong(split, 8, 0);
+        // Migration from v1.0: if a PIN exists but the flag was never stored, keep protection on
+        mIsPinEnabled         = Helpers.parseBoolean(split, 9, mPin != null && !mPin.isEmpty());
     }
 
     private void persistData() {
         mAppPrefs.setData(KIDS_MODE_DATA,
                 Helpers.mergeData(mIsEnabled, mPin, mTimerMinutes,
                         mBlockShorts, mBlockRecommendations, mCalmExit,
-                        mDailyDate, mDailyUsedMs, mDailyBonusMs));
+                        mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled));
     }
 }
