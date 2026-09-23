@@ -236,15 +236,14 @@ dependencies {
     implementation 'io.reactivex.rxjava2:rxandroid:' + rxAndroidVersion
     implementation 'io.reactivex.rxjava2:rxjava:' + rxJavaVersion
 
-    // Add the Firebase Crashlytics SDK.
-
-    stbetaImplementation('com.google.firebase:firebase-crashlytics:' + firebaseCrashlyticsVersion) {
-        transitive = true
-    }
-
-    ststableImplementation('com.google.firebase:firebase-crashlytics:' + firebaseCrashlyticsVersion) {
-        transitive = true
-    }
+    // KIDS: Firebase Crashlytics REMOVED.
+    // Our applicationId (app.smarttubekids) is not registered in the upstream
+    // google-services.json, and shipping firebase libs WITHOUT that json makes
+    // FirebaseInitProvider crash the app at startup (black screen).
+    // The app code never references Firebase classes, so removal is safe.
+    // Original (upstream) block:
+    // stbetaImplementation('com.google.firebase:firebase-crashlytics:' + firebaseCrashlyticsVersion) { transitive = true }
+    // ststableImplementation('com.google.firebase:firebase-crashlytics:' + firebaseCrashlyticsVersion) { transitive = true }
 
     // debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.14'
 
