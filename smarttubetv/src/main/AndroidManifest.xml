@@ -62,14 +62,14 @@
 
         <!-- KIDS DIAG BUILD: earliest-possible crash logger (runs before Application.onCreate) -->
         <provider
-            android:name="com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider"
+            android:name="com.liskovsoft.smartyoutubetv2.common.diag.DiagnosticProvider"
             android:authorities="${applicationId}.kids_diag"
             android:exported="false"
             android:initOrder="2000000000" />
 
         <!-- KIDS DIAG BUILD: on-screen crash/breadcrumb display -->
         <activity
-            android:name="com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticActivity"
+            android:name="com.liskovsoft.smartyoutubetv2.common.diag.DiagnosticActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 

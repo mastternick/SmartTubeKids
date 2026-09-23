@@ -74,6 +74,8 @@ public class MotherActivity extends FragmentActivity {
 
         Log.d(TAG, "Starting %s...", this.getClass().getSimpleName());
 
+        com.liskovsoft.smartyoutubetv2.common.diag.DiagnosticProvider.crumb(this.getClass().getSimpleName() + ".onCreate"); // KIDS DIAG
+
         mIsOculusQuestFixEnabled = PlayerTweaksData.instance(this).isOculusQuestFixEnabled();
         mIsFullscreenModeEnabled = GeneralData.instance(this).isFullscreenModeEnabled();
 

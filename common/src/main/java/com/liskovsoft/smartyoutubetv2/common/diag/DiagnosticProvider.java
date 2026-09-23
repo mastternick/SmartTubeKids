@@ -1,4 +1,4 @@
-package com.liskovsoft.smartyoutubetv2.tv.diag;
+package com.liskovsoft.smartyoutubetv2.common.diag;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
@@ -7,7 +7,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Handler;
-import android.os.Looper;
+import android.os.HandlerThread;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -20,23 +20,29 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * KIDS DIAGNOSTIC BUILD.
+ * KIDS DIAGNOSTIC BUILD (temporary — remove after the black screen is fixed).
  *
- * A ContentProvider runs BEFORE Application.onCreate, so this is the earliest place
- * we can install a global crash handler and start logging boot breadcrumbs.
+ * A ContentProvider's onCreate runs BEFORE Application.onCreate, so this is the
+ * earliest place to install a global crash handler and start boot breadcrumbs.
  *
- * Everything is written to a file in the app's external files dir AND kept in memory.
- * On any uncaught exception, or if the UI never shows up (hang/black screen),
- * {@link DiagnosticActivity} is launched to print the collected info ON SCREEN.
+ * - Every breadcrumb is kept in memory AND appended to a file.
+ * - On any uncaught exception: the stack trace is shown FULLSCREEN on the TV
+ *   and the process is kept alive (diagnostic build only).
+ * - If the UI never becomes visible within UI_WATCHDOG_MS, the watchdog
+ *   (running on its OWN thread, immune to a blocked main thread) shows the
+ *   breadcrumbs on screen.
  *
- * NOTE: This whole class is temporary and should be removed once the black screen is fixed.
+ * The user photographs the yellow-on-black screen — no adb needed.
  */
 public class DiagnosticProvider extends ContentProvider {
     public static final String BREADCRUMB_FILE = "kids_diag_breadcrumbs.txt";
 
     private static final List<String> sCrumbs = new ArrayList<>();
     private static volatile boolean sUiShown = false;
-    private static final long UI_WATCHDOG_MS = 9_000;
+    private static volatile boolean sDiagScreenShown = false;
+    private static final long UI_WATCHDOG_MS = 10_000;
+
+    private static Context sContextRef;
 
     public static void crumb(String msg) {
         String line = time() + "  " + msg;
@@ -48,7 +54,7 @@ public class DiagnosticProvider extends ContentProvider {
 
     public static void markUiShown() {
         sUiShown = true;
-        crumb("UI SHOWN (BrowseActivity/Splash visible)");
+        crumb("UI SHOWN (main screen visible)");
     }
 
     public static String dump() {
@@ -77,11 +83,10 @@ public class DiagnosticProvider extends ContentProvider {
         }
     }
 
-    private static Context sContextRef;
-
     @Override
     public boolean onCreate() {
         sContextRef = getContext() != null ? getContext().getApplicationContext() : null;
+
         // Fresh log each launch
         try {
             if (sContextRef != null) {
@@ -96,7 +101,7 @@ public class DiagnosticProvider extends ContentProvider {
                 + " / Android " + android.os.Build.VERSION.RELEASE + " (API " + android.os.Build.VERSION.SDK_INT + ")");
 
         installCrashHandler();
-        startUiWatchdog();
+        startUiWatchdogOnOwnThread();
 
         return true;
     }
@@ -111,31 +116,46 @@ public class DiagnosticProvider extends ContentProvider {
                 String trace = "FATAL EXCEPTION on thread [" + thread.getName() + "]:\n" + sw;
 
                 crumb("!!! UNCAUGHT EXCEPTION !!!\n" + trace);
+
+                // DIAG BUILD: show the error on screen and KEEP THE PROCESS ALIVE
+                // (normally we'd forward to prev/kill, but then the user sees nothing)
                 showDiagScreen(trace);
+                return; // do not kill: the diag screen must stay visible
             } catch (Throwable ignored) {
             }
 
+            // Fallback: only if showing the screen failed
             if (prev != null) {
                 prev.uncaughtException(thread, ex);
-            } else {
-                android.os.Process.killProcess(android.os.Process.myPid());
-                System.exit(10);
             }
         });
     }
 
-    private void startUiWatchdog() {
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+    /**
+     * Watchdog on a dedicated thread: even if the main thread is blocked
+     * (hang/black screen), this still fires and shows the breadcrumbs.
+     */
+    private void startUiWatchdogOnOwnThread() {
+        HandlerThread thread = new HandlerThread("kids-diag-watchdog");
+        thread.start();
+        new Handler(thread.getLooper()).postDelayed(() -> {
             if (!sUiShown) {
                 String msg = "UI NEVER SHOWED UP within " + (UI_WATCHDOG_MS / 1000)
-                        + "s -> black screen / hang.\n\nLast breadcrumbs:\n" + dump();
-                crumb("!!! WATCHDOG: UI not shown !!!");
+                        + "s -> black screen / hang.\n\nBreadcrumbs:\n" + dump();
+                crumb("!!! WATCHDOG: UI not shown within " + (UI_WATCHDOG_MS / 1000) + "s !!!");
                 showDiagScreen(msg);
+            } else {
+                thread.quit();
             }
         }, UI_WATCHDOG_MS);
     }
 
     private void showDiagScreen(String message) {
+        if (sDiagScreenShown) {
+            return;
+        }
+        sDiagScreenShown = true;
+
         try {
             Context ctx = sContextRef;
             if (ctx == null) return;
@@ -143,7 +163,11 @@ public class DiagnosticProvider extends ContentProvider {
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
             i.putExtra(DiagnosticActivity.EXTRA_MESSAGE, message);
             ctx.startActivity(i);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            try {
+                crumb("showDiagScreen FAILED: " + t);
+            } catch (Throwable ignored) {
+            }
         }
     }
 

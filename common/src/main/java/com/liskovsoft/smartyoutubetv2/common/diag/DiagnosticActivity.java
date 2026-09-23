@@ -1,4 +1,4 @@
-package com.liskovsoft.smartyoutubetv2.tv.diag;
+package com.liskovsoft.smartyoutubetv2.common.diag;
 
 import android.app.Activity;
 import android.graphics.Color;
