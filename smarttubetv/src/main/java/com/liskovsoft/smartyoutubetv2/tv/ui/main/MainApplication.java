@@ -56,6 +56,9 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
     public void onCreate() {
         super.onCreate();
 
+        // KIDS v1.2.4: clear poisoned dim/screen-off prefs BEFORE anything reads them
+        com.liskovsoft.smartyoutubetv2.common.misc.KidsMigration.migrateIfNeeded(this);
+
         // ByeByeDPI fix
         // https://android-review.googlesource.com/c/platform/external/conscrypt/+/89408/
         // NOTE: Android 10+ (API 29+) uses system Conscrypt TLS; custom Security providers are unnecessary

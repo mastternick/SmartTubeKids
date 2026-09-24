@@ -226,12 +226,19 @@ public class MotherActivity extends FragmentActivity {
 
         applyFullscreenModeIfNeeded();
 
-        // KIDS: calm-exit black screen carries over between activities until first key press
-        if (KidsScreenHelper.consumePendingScreenOff()) {
-            KidsScreenHelper.showBlackScreen(this);
-        } else {
-            // KIDS: apply user brightness override (from the player menu)
-            KidsScreenHelper.applyBrightness(this);
+        // KIDS v1.2.4: startup hooks REMOVED (root cause of black screen since v1.2.0).
+        // Brightness is applied only inside the player (KidsModeController.onVideoLoaded).
+        // On the first launch after the v1.2.4 migration, force-dismiss any LIVE system
+        // screensaver / stuck dim state (clearing prefs alone can't dismiss an
+        // already-active screensaver session).
+        if (com.liskovsoft.smartyoutubetv2.common.misc.KidsMigration.consumeFirstLaunch()) {
+            try {
+                Helpers.disableScreensaver(this);
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                getWindow().setAttributes(lp);
+            } catch (Throwable ignored) {
+            }
         }
 
         // Restore this activity's screensaver policy after returning to the foreground.
