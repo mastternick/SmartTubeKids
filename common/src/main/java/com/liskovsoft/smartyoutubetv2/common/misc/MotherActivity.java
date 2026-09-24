@@ -137,13 +137,7 @@ public class MotherActivity extends FragmentActivity {
         }
 
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            // KIDS: first key press wakes up from the calm-exit black screen (and consumes the key)
-            if (KidsScreenHelper.isBlackScreenShown(this)) {
-                KidsScreenHelper.hideBlackScreen(this);
-                KidsScreenHelper.clearPendingScreenOff();
-                return true;
-            }
-
+            // KIDS-SIMPLE-FIX: black-screen wake hook REMOVED for bisecting (overlay never shown now)
             boolean isKeepScreenOff = mScreensaverManager.isScreenOff() && Helpers.equalsAny(event.getKeyCode(),
                     new int[]{KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN});
             if (!isKeepScreenOff) {
@@ -226,13 +220,14 @@ public class MotherActivity extends FragmentActivity {
 
         applyFullscreenModeIfNeeded();
 
-        // KIDS: calm-exit black screen carries over between activities until first key press
-        if (KidsScreenHelper.consumePendingScreenOff()) {
-            KidsScreenHelper.showBlackScreen(this);
-        } else {
-            // KIDS: apply user brightness override (from the player menu)
-            KidsScreenHelper.applyBrightness(this);
-        }
+        // KIDS-SIMPLE-FIX: startup hooks REMOVED for bisecting the black screen.
+        // Brightness is applied only in the player (KidsModeController.onVideoLoaded).
+        // Original v1.2 code:
+        // if (KidsScreenHelper.consumePendingScreenOff()) {
+        //     KidsScreenHelper.showBlackScreen(this);
+        // } else {
+        //     KidsScreenHelper.applyBrightness(this);
+        // }
 
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();
