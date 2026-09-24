@@ -1,5 +1,6 @@
 package com.liskovsoft.smartyoutubetv2.tv.ui.main;
 
+import android.content.Context;
 import android.os.Build.VERSION;
 
 import androidx.multidex.MultiDexApplication;
@@ -53,7 +54,15 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
     }
 
     @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        // KIDS DIAG: earliest possible hook (before any provider/Application.onCreate of others)
+        com.liskovsoft.smartyoutubetv2.common.diag.DiagnosticProvider.installEarly(base);
+    }
+
+    @Override
     public void onCreate() {
+        com.liskovsoft.smartyoutubetv2.common.diag.DiagnosticProvider.crumb("MainApplication.onCreate START"); // KIDS DIAG
         super.onCreate();
 
         // ByeByeDPI fix
@@ -83,6 +92,7 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
 
         setupGlobalExceptionHandler();
         setupViewManager();
+        com.liskovsoft.smartyoutubetv2.common.diag.DiagnosticProvider.crumb("MainApplication.onCreate END"); // KIDS DIAG
     }
 
     private void setupViewManager() {
