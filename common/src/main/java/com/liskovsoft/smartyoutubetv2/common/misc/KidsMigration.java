@@ -18,7 +18,7 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
  */
 public class KidsMigration {
     private static final String TAG = KidsMigration.class.getSimpleName();
-    private static final String FLAG_KEY = "kids_m…_v124";
+    private static final String FLAG_KEY = "kids_migration_done_v124";
 
     private static volatile boolean sFirstLaunchAfterMigration;
 
