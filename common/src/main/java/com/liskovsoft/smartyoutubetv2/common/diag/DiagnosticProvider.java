@@ -179,7 +179,7 @@ public class DiagnosticProvider extends ContentProvider {
         }, UI_WATCHDOG_MS);
     }
 
-    private void showDiagScreen(String message) {
+    private static void showDiagScreen(String message) {
         if (sDiagScreenRequested) {
             return;
         }
