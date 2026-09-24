@@ -54,7 +54,6 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
 
     @Override
     public void onCreate() {
-        com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider.crumb("MainApplication.onCreate START");
         super.onCreate();
 
         // ByeByeDPI fix
@@ -84,7 +83,6 @@ public class MainApplication extends MultiDexApplication { // fix: Didn't find c
 
         setupGlobalExceptionHandler();
         setupViewManager();
-        com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider.crumb("MainApplication.onCreate END");
     }
 
     private void setupViewManager() {

@@ -60,19 +60,6 @@
         tools:replace="android:theme,android:allowBackup"
         tools:ignore="GoogleAppIndexingWarning,LockedOrientationActivity,UnusedAttribute,DiscouragedApi">
 
-        <!-- KIDS DIAG BUILD: earliest-possible crash logger (runs before Application.onCreate) -->
-        <provider
-            android:name="com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider"
-            android:authorities="${applicationId}.kids_diag"
-            android:exported="false"
-            android:initOrder="2000000000" />
-
-        <!-- KIDS DIAG BUILD: on-screen crash/breadcrumb display -->
-        <activity
-            android:name="com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
-
         <!-- Screen Mirror (e.g. DIAL) for Amazon TV -->
         <!-- Not implemented yet( -->
         <!--<meta-data android:name="whisperplay" android:resource="@xml/whisperplay"/>-->

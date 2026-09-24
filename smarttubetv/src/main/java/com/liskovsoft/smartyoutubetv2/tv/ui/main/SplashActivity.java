@@ -13,7 +13,6 @@ public class SplashActivity extends MotherActivity implements SplashView {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider.crumb("SplashActivity.onCreate");
         super.onCreate(savedInstanceState);
 
         mNewIntent = getIntent();
@@ -21,7 +20,6 @@ public class SplashActivity extends MotherActivity implements SplashView {
         mPresenter = SplashPresenter.instance(this);
         mPresenter.setView(this);
         mPresenter.onViewInitialized();
-        com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider.crumb("SplashActivity: presenter initialized");
 
         //finish();
     }

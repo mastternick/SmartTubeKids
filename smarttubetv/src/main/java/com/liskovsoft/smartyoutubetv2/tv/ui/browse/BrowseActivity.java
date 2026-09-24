@@ -12,11 +12,9 @@ public class BrowseActivity extends LeanbackActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider.crumb("BrowseActivity.onCreate");
         super.onCreate(savedInstanceState);
         try {
             setContentView(R.layout.fragment_main);
-            com.liskovsoft.smartyoutubetv2.tv.diag.DiagnosticProvider.markUiShown();
         } catch (NoClassDefFoundError e) {
             // Failed resolution of: Landroidx/lifecycle/ViewTreeLifecycleOwner;
             MessageHelpers.showMessage(this, e.getMessage());
