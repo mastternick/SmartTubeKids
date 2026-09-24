@@ -49,7 +49,9 @@ public class ContextMenuManager {
                         kidsData.setMenuProviderRegistered(true);
                     }
                 } catch (Throwable ignored) {
-                    // never let registration break the app
+                    // KIDS: allow retry on a later ContextMenuManager construction
+                    // so a transient failure doesn't permanently disable the menu item.
+                    sKidsItemRegistered = false;
                 }
             });
         }
