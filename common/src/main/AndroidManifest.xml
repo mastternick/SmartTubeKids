@@ -56,6 +56,22 @@
                 <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
             </intent-filter>
         </receiver>
+        <!-- KIDS: device admin receiver for kiosk mode (Lock Task).
+             Becomes useful when the app is set as device owner via ADB (see KIOSK.md):
+             adb shell dpm set-device-owner <applicationId>/com.liskovsoft.smartyoutubetv2.common.misc.KioskDeviceAdminReceiver -->
+        <receiver
+            android:name="com.liskovsoft.smartyoutubetv2.common.misc.KioskDeviceAdminReceiver"
+            android:label="@string/kids_kiosk_mode"
+            android:description="@string/kids_kiosk_mode_desc"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/kids_device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
         <!-- NOTE: Starting from Android 12 (api 31) foreground service with type 'connectedDevice' not supported -->
         <!-- Use 'mediaPlayback' type instead -->
         <service

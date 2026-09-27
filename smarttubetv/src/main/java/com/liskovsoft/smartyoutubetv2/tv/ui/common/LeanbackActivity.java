@@ -4,10 +4,12 @@ import android.annotation.SuppressLint;
 import android.os.Bundle;
 import android.view.KeyEvent;
 
+import com.liskovsoft.sharedutils.helpers.MessageHelpers; // KIDS
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.autoframerate.ModeSyncManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.GlobalKeyTranslator;
+import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MotherActivity;
 import com.liskovsoft.smartyoutubetv2.common.misc.PlayerKeyTranslator;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
@@ -94,6 +96,14 @@ public abstract class LeanbackActivity extends MotherActivity {
     public void finish() {
         // user pressed back key
         if (!getViewManager().hasParentView(this)) {
+            // KIDS: kiosk mode — the child must not be able to exit the app with BACK.
+            // Swallow the exit and stay on the current (root) screen.
+            // NOTE: internal finishReally() calls super.finish() and bypass this override.
+            if (KioskModeManager.isKioskEnabled(this)) {
+                MessageHelpers.showMessage(this, com.liskovsoft.smartyoutubetv2.common.R.string.kids_kiosk_exit_blocked);
+                return;
+            }
+
             switch (getGeneralData().getAppExitShortcut()) {
                 case GeneralData.EXIT_DOUBLE_BACK:
                     mDoubleBackManager.enableDoubleBackExit(this::finishTheApp);

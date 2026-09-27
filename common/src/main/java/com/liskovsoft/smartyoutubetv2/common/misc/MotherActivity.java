@@ -241,6 +241,11 @@ public class MotherActivity extends FragmentActivity {
             }
         }
 
+        // KIDS: kiosk mode (Lock Task) auto-apply/release. Fully guarded and throttled
+        // inside KioskModeManager; runs only here (on resume), never in constructors or
+        // restoreState paths (lesson from the v1.2.0 black screen).
+        KioskModeManager.applyOnResume(this);
+
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();
     }

@@ -11,6 +11,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS
+import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
@@ -151,6 +152,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         AppDialogPresenter settingsPresenter = AppDialogPresenter.instance(getContext());
 
         appendEnableSwitch(settingsPresenter);
+        appendKioskSwitch(settingsPresenter); // KIDS: block leaving the app
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
@@ -168,6 +170,40 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                 getContext().getString(R.string.kids_mode_desc),
                 option -> enableKidsMode(option.isSelected()),
                 mKidsData.isEnabled()));
+    }
+
+    /**
+     * KIDS: Kiosk mode switch — the child cannot leave the app (Lock Task / screen pinning).
+     *
+     * The lock is NOT started from here on purpose: this dialog lives in its own
+     * transient task (AppDialogActivity, noHistory) and pinning that task would drop
+     * the lock as soon as the dialog closes. Instead we persist the preference and
+     * KioskModeManager.applyOnResume (hooked in MotherActivity.onResume) locks the
+     * real activity (Browse/Playback) right after the dialog is gone.
+     * Turning OFF unlocks immediately (stopLockTask is global for the app).
+     */
+    private void appendKioskSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_kiosk_mode),
+                getContext().getString(R.string.kids_kiosk_mode_desc),
+                option -> {
+                    mKidsData.setKioskEnabled(option.isSelected());
+
+                    if (option.isSelected()) {
+                        MessageHelpers.showMessage(getContext(), KioskModeManager.isDeviceOwner(getContext())
+                                ? R.string.kids_kiosk_enabled_full
+                                : R.string.kids_kiosk_enabled_pinned);
+                    } else {
+                        Context context = getContext();
+
+                        if (context instanceof Activity) {
+                            KioskModeManager.stopKiosk((Activity) context);
+                        }
+
+                        MessageHelpers.showMessage(getContext(), R.string.kids_kiosk_disabled);
+                    }
+                },
+                mKidsData.isKioskEnabled()));
     }
 
     private void appendBlockShortsSwitch(AppDialogPresenter settingsPresenter) {

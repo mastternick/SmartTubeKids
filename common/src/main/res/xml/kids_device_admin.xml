@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- KIDS: device admin declaration for kiosk mode (see KioskDeviceAdminReceiver).
+     Lock Task allowlisting does not require any specific policy, so the
+     uses-policies list is intentionally empty: the app never wipes data,
+     never forces passwords and never touches other device policies. -->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+    </uses-policies>
+</device-admin>
