@@ -70,6 +70,48 @@ public class SidebarService implements ProfileChangeListener {
         persistState();
     }
 
+    /**
+     * KIDS: move a user-pinned item (playlist/channel) to the top of the pinned-items
+     * area (same slot addPinnedItem uses). Called by KidsSidebarManager to order
+     * kids playlists: pinning in reverse + move-to-top yields the selection order.
+     */
+    public void movePinnedItemToTop(int itemId) {
+        int from = Helpers.indexOfFirst(mPinnedItems, obj -> obj.getId() == itemId);
+
+        if (from == -1) {
+            return;
+        }
+
+        Video item = mPinnedItems.remove(from);
+
+        int idx = Helpers.indexOfFirst(mPinnedItems, obj -> obj.getId() > RESERVED_ID);
+
+        if (idx == -1) {
+            mPinnedItems.add(item);
+        } else {
+            mPinnedItems.add(idx, item);
+        }
+
+        persistState();
+    }
+
+    /**
+     * KIDS: move a section entry to the bottom of the sidebar
+     * (used to keep Settings visible and LAST — anti-lockout).
+     */
+    public void movePinnedItemToBottom(int sectionId) {
+        int index = findPinnedItemIndex(sectionId);
+
+        if (index == -1) {
+            return;
+        }
+
+        Video item = mPinnedItems.remove(index);
+        mPinnedItems.add(item);
+
+        persistState();
+    }
+
     public void enableSection(int sectionId, boolean enabled) {
         if (enabled) {
             if (sectionId == MediaGroup.TYPE_SETTINGS) {

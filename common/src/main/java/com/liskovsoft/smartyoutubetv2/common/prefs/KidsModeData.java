@@ -4,6 +4,9 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import com.liskovsoft.sharedutils.helpers.Helpers;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * KIDS: Persistent storage for Kids Mode settings + daily watch-time counters.
  * Pattern follows existing prefs classes (SponsorBlockData, SearchData).
@@ -25,6 +28,11 @@ public class KidsModeData {
     private boolean mCalmExit;             // show warnings before limit expires
     private int mBrightnessPercent;        // KIDS: -1 = auto/system, 10..100 = override
     private boolean mIsMenuProviderRegistered; // KIDS: one-time menu item activation
+    private long mVisibleSections;         // KIDS: bitmask of sidebar sections visible in Kids Mode (-1 = not configured yet)
+    private boolean mIsSearchEnabled;      // KIDS: allow search in Kids Mode (default true)
+    private String mKidsPlaylists;         // KIDS: selected account playlists, "playlistId|title" entries, list-delim separated
+    private List<String> mKidsPlaylistList = new ArrayList<>(); // KIDS: parsed view of mKidsPlaylists
+    private boolean mIsKioskEnabled;       // KIDS: kiosk mode (Lock Task) - child cannot leave the app
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -159,6 +167,101 @@ public class KidsModeData {
         persistData();
     }
 
+    // --- Sidebar sections (KIDS) ---
+
+    /**
+     * @return bitmask of section ids (MediaGroup.TYPE_*) visible in Kids Mode;
+     *         -1 means "not configured yet" (first activation decides).
+     */
+    public long getVisibleSections() {
+        return mVisibleSections;
+    }
+
+    public void setVisibleSections(long sectionsMask) {
+        mVisibleSections = sectionsMask;
+        persistData();
+    }
+
+    public boolean isSectionVisible(int sectionId) {
+        return (mVisibleSections & (1L << sectionId)) != 0;
+    }
+
+    public void setSectionVisible(int sectionId, boolean visible) {
+        if (visible) {
+            mVisibleSections |= (1L << sectionId);
+        } else {
+            mVisibleSections &= ~(1L << sectionId);
+        }
+        persistData();
+    }
+
+    // --- Search (KIDS) ---
+
+    public boolean isSearchEnabled() {
+        return mIsSearchEnabled;
+    }
+
+    public void setSearchEnabled(boolean enabled) {
+        mIsSearchEnabled = enabled;
+        persistData();
+    }
+
+    // --- Kids playlists (KIDS) ---
+
+    /**
+     * Playlists selected by the parent for the child.
+     * Each entry: "playlistId|title".
+     * Empty list = show ALL account playlists (per decision A); the Playlists
+     * tab itself is controlled by the sections mask.
+     */
+    public List<String> getKidsPlaylists() {
+        return mKidsPlaylistList;
+    }
+
+    public void setKidsPlaylists(List<String> playlists) {
+        mKidsPlaylistList = playlists != null ? new ArrayList<>(playlists) : new ArrayList<>();
+        mKidsPlaylists = Helpers.mergeList(mKidsPlaylistList);
+        persistData();
+    }
+
+    public boolean isPlaylistSelected(String playlistId) {
+        for (String entry : mKidsPlaylistList) {
+            if (entry.startsWith(playlistId + "|")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void addPlaylist(String playlistId, String title) {
+        if (!isPlaylistSelected(playlistId)) {
+            mKidsPlaylistList.add(playlistId + "|" + title);
+            mKidsPlaylists = Helpers.mergeList(mKidsPlaylistList);
+            persistData();
+        }
+    }
+
+    public void removePlaylist(String playlistId) {
+        Helpers.removeIf(mKidsPlaylistList, entry -> entry.startsWith(playlistId + "|"));
+        mKidsPlaylists = Helpers.mergeList(mKidsPlaylistList);
+        persistData();
+    }
+
+    // --- Kiosk mode (KIDS) ---
+
+    /**
+     * KIDS: kiosk mode (Android Lock Task). When ON the app re-locks itself on
+     * every activity resume and BACK never exits the app. See KioskModeManager.
+     */
+    public boolean isKioskEnabled() {
+        return mIsKioskEnabled;
+    }
+
+    public void setKioskEnabled(boolean enabled) {
+        mIsKioskEnabled = enabled;
+        persistData();
+    }
+
     // --- Daily counters ---
 
     public String getDailyDate() {
@@ -212,6 +315,11 @@ public class KidsModeData {
         mIsPinEnabled         = Helpers.parseBoolean(split, 9, mPin != null && !mPin.isEmpty());
         mBrightnessPercent    = Helpers.parseInt(split, 10, -1); // -1 = auto
         mIsMenuProviderRegistered = Helpers.parseBoolean(split, 11, false);
+        mVisibleSections      = Helpers.parseLong(split, 12, -1); // -1 = not configured yet
+        mIsSearchEnabled      = Helpers.parseBoolean(split, 13, true); // KIDS: search default ON per parent decision
+        mKidsPlaylists        = Helpers.parseStr(split, 14);
+        mKidsPlaylistList     = new ArrayList<>(Helpers.parseStrList(split, 14));
+        mIsKioskEnabled       = Helpers.parseBoolean(split, 15, false); // KIDS: kiosk default OFF
     }
 
     private void persistData() {
@@ -219,6 +327,7 @@ public class KidsModeData {
                 Helpers.mergeData(mIsEnabled, mPin, mTimerMinutes,
                         mBlockShorts, mBlockRecommendations, mCalmExit,
                         mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
-                        mIsMenuProviderRegistered));
+                        mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
+                        mIsKioskEnabled));
     }
 }
