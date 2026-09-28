@@ -229,7 +229,13 @@ public class KioskModeManager {
         try {
             android.os.PowerManager pm = (android.os.PowerManager)
                     context.getSystemService(Context.POWER_SERVICE);
-            return pm == null || pm.isInteractive();
+
+            if (pm == null) {
+                return true;
+            }
+
+            // minSdk 17: isInteractive() exists from API 20, isScreenOn() before (lint NewApi).
+            return Build.VERSION.SDK_INT >= 20 ? pm.isInteractive() : pm.isScreenOn();
         } catch (Throwable e) {
             return true; // fail open: treat as interactive, the other guards still apply
         }
