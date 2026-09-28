@@ -14,6 +14,7 @@ import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
+import com.liskovsoft.smartyoutubetv2.common.utils.Utils; // KIDS v1.2.7: postDelayed / foreground check
 
 /**
  * KIDS: Kiosk mode — the child cannot leave the app.
@@ -26,11 +27,23 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
  *    persistent HOME. Result: HOME/RECENTS keys do nothing, no notifications,
  *    no confirmation dialogs, the app relaunches itself after a TV reboot and
  *    the only way out is the PIN-protected switch inside Kids Mode settings.
+ *    Lock Task is safe for the app's own activities: every activity of an
+ *    allowlisted package keeps working (playback, Settings, dialogs).
  *
- * 2. SCREEN PINNING (no Device Owner, best effort). startLockTask() falls back
- *    to the system screen pinning: the parent confirms a system prompt once and
- *    the app stays on screen until it is unpinned (hold BACK/RECENTS on the
- *    remote). Weaker, but requires no setup.
+ * 2. SOFT LOCK (no Device Owner, best effort). The BACK key never exits
+ *    (intercepted in LeanbackActivity.finish) and when the app loses the screen
+ *    — e.g. the child presses HOME — it tries to come back on its own
+ *    (scheduleReentry). Weaker than the full lock but requires no setup.
+ *
+ * v1.2.7: the old "screen pinning" fallback (startLockTask without Device Owner)
+ * was REMOVED. This app runs every activity as launchMode=singleInstance — each
+ * one in its own task (Browse, Playback, dialogs...). System screen pinning
+ * confines the task it was started from, so with a pinned Browse task every
+ * launch into another task was refused by the system: the child could no longer
+ * open a clip or the Settings screen ("it says blocked / kiosk mode" — the exact
+ * v1.2.6 bug report). Full lock via Device Owner does not have this problem
+ * because the whole package is allowlisted — which is why lock task now runs
+ * only in that mode.
  *
  * IMPORTANT (lesson from the v1.2.0 black screen): everything here is wrapped
  * in try/catch(Throwable) and is only called from Activity.onResume (never from
@@ -46,6 +59,8 @@ public class KioskModeManager {
     private static final long AUTO_LOCK_THROTTLE_MS = 15_000;
     // Let short-lived activities (e.g. SplashActivity) finish before locking their task.
     private static final long AUTO_LOCK_DELAY_MS = 2_000;
+    // KIDS v1.2.7: soft lock grace period before the app climbs back on screen.
+    private static final long REENTRY_DELAY_MS = 2_500;
 
     private static final int DO_STATE_UNKNOWN = 0;
     private static final int DO_STATE_APPLIED = 1;
@@ -131,11 +146,22 @@ public class KioskModeManager {
      * KIDS: single entry point for MotherActivity.onResume.
      * Applies the lock when kiosk is ON, releases it when OFF.
      * Must never throw (startup path).
+     *
+     * KIDS v1.2.7: Lock Task is only applied with Device Owner. Without DO the
+     * soft lock (BACK interception + scheduleReentry) is used, and a stale pin
+     * left over from v1.2.6 builds is actively released — pinning the Browse
+     * task would refuse every other singleInstance task the app starts
+     * (Playback, Settings), which is exactly what broke playback in v1.2.6.
      */
     public static void applyOnResume(Activity activity) {
         try {
             if (isKioskEnabled(activity)) {
-                autoLockIfNeeded(activity);
+                if (isDeviceOwner(activity)) {
+                    applyDeviceOwnerPolicies(activity);
+                    autoLockIfNeeded(activity);
+                } else if (isLockTaskActive(activity)) {
+                    stopKiosk(activity); // release stale screen pinning (v1.2.6 upgrade path)
+                }
             } else if (isLockTaskActive(activity)) {
                 stopKiosk(activity);
             } else {
@@ -143,6 +169,69 @@ public class KioskModeManager {
             }
         } catch (Throwable e) {
             Log.e(TAG, e);
+        }
+    }
+
+    /**
+     * KIDS v1.2.7: called from MotherActivity.onStop — the soft lock part.
+     * When kiosk is ON but there's no Device Owner and the app really left the
+     * screen (HOME pressed, another app opened — not screen-off, not PIP),
+     * re-launch our own main activity so the child gets back to the app.
+     * On Android 10+ the system may silently refuse background activity starts;
+     * in that case nothing happens (guarded, no crash) and the BACK interception
+     * still keeps the app un-exitable from the inside.
+     */
+    public static void scheduleReentry(Activity activity) {
+        try {
+            if (Build.VERSION.SDK_INT < 21 || !isKioskEnabled(activity)
+                    || isDeviceOwner(activity) || isTransientTask(activity)) {
+                return;
+            }
+
+            final Context context = activity.getApplicationContext();
+
+            Utils.postDelayed(() -> {
+                try {
+                    if (!isKioskEnabled(context) // parent turned it off meanwhile
+                            || Utils.isAppInForegroundFixed() // normal in-app navigation
+                            || isInPipPlayback(context) // PIP window is fine to keep
+                            || !isScreenInteractive(context)) { // screen off / standby
+                        return;
+                    }
+
+                    Intent launch = context.getPackageManager()
+                            .getLaunchIntentForPackage(context.getPackageName());
+
+                    if (launch != null) {
+                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        context.startActivity(launch);
+                        Log.d(TAG, "Kiosk soft lock: bringing the app back on screen");
+                    }
+                } catch (Throwable e) {
+                    Log.e(TAG, e);
+                }
+            }, REENTRY_DELAY_MS);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+    }
+
+    private static boolean isInPipPlayback(Context context) {
+        try {
+            return com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter
+                    .instance(context).isInPipMode();
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    private static boolean isScreenInteractive(Context context) {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager)
+                    context.getSystemService(Context.POWER_SERVICE);
+            return pm == null || pm.isInteractive();
+        } catch (Throwable e) {
+            return true; // fail open: treat as interactive, the other guards still apply
         }
     }
 

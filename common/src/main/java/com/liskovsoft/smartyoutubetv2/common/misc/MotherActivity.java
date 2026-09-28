@@ -259,6 +259,17 @@ public class MotherActivity extends FragmentActivity {
     }
 
     @Override
+    protected void onStop() {
+        super.onStop();
+
+        // KIDS v1.2.7: kiosk soft lock. When the app is leaving the screen without
+        // Device Owner, KioskModeManager schedules a guarded attempt to climb back
+        // on screen. No-op unless kiosk is ON (and not DO / not transient task /
+        // not PIP / screen on). Guarded try/catch inside, like the onResume hook.
+        KioskModeManager.scheduleReentry(this);
+    }
+
+    @Override
     protected void onDestroy() {
         if (mScreensaverManager != null) {
             mScreensaverManager.cleanup();

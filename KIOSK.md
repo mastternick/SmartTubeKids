@@ -7,13 +7,21 @@ automatically after a TV reboot. The only way out is the PIN-protected switch:
 
 There are two levels of protection:
 
-| | Full lock (recommended) | Screen pinning (no setup) |
+| | Full lock (recommended) | Soft lock (no setup) |
 |---|---|---|
 | Requires | One-time ADB command (Device Owner) | Nothing |
-| Confirmation prompts | None, silent lock | System prompt on (re)lock |
-| HOME / RECENTS | Blocked | Blocked while pinned |
-| After TV reboot | App launches directly, re-locks itself | Normal launcher first; app re-asks to pin when opened |
-| Child can escape? | No (only the PIN switch) | Possible: hold BACK to unpin, or ignore the pin prompt |
+| Confirmation prompts | None, silent lock | None |
+| HOME / RECENTS | Blocked | App climbs back on screen ~2s after leaving |
+| BACK key | Never exits | Never exits |
+| Playback / Settings inside the app | Fully working | Fully working |
+| After TV reboot | App launches directly, re-locks itself | Normal launcher start; app returns on its own once opened |
+| Child can escape? | No (only the PIN switch) | Partially: quick look at the home screen, may keep if Android refuses the return |
+
+> **Why no screen pinning anymore (v1.2.7)?** This app runs every screen in its own
+> task (`launchMode=singleInstance`). System screen pinning confines one task, so
+> pinning the browse screen made it impossible to start playback or open Settings —
+> exactly the bug users reported in v1.2.6. Lock Task is therefore applied only with
+> Device Owner (the whole package is allowlisted, all app screens keep working).
 
 Enable the Kids **PIN** before enabling kiosk — otherwise the child can open
 Kids Mode settings and turn kiosk off.
@@ -55,13 +63,14 @@ Notes / troubleshooting:
   ```
   (or simply turn the kiosk switch off in the app; a factory reset also clears it).
 
-## Option B — Screen pinning (no ADB)
+## Option B — Soft lock (no ADB)
 
-Just enable **Kiosk mode** in Kids Mode settings. When you close the settings, Android
-shows a screen-pinning confirmation — accept it. The app stays locked until someone
-holds BACK (and RECENTS) and confirms the unpin dialog, so it is weaker protection:
-a determined older child can escape, and after a reboot the pin prompt must be
-accepted again. Use Option A whenever possible.
+Just enable **Kiosk mode** in Kids Mode settings. No system dialogs: the BACK key
+never exits the app, and when the child presses HOME the app tries to climb back on
+screen after ~2 seconds. Weaker protection than Option A — on Android 10+ the system
+may refuse the background return, in which case the app simply stays closed until
+opened again — but playback and Settings keep working normally inside the app.
+Use Option A whenever possible.
 
 ## Exiting kiosk
 
@@ -84,9 +93,10 @@ mode"**.
   ```
   Apoi activează PIN-ul și Kiosk mode în setările Kids. Fără mesaje de confirmare,
   copilul nu poate ieși.
-- **Fără ADB:** activează doar comutatorul Kiosk — Android va cere o confirmare de
-  „fixare a ecranului" (screen pinning). Protecția e mai slabă: se poate ieși cu
-  BACK apăsat lung.
+- **Fără ADB (soft lock):** activează doar comutatorul Kiosk — BACK nu mai iese din
+  aplicație, iar după apăsarea HOME aplicația încearcă să revină pe ecran în ~2
+  secunde. Pe Android 10+ sistemul poate refuza revenirea din fundal; în rest,
+  redarea și Setările funcționează normal în interiorul aplicației.
 - Activează **PIN-ul** înainte de kiosk, altfel copilul poate opri comutatorul.
 - Anularea device owner (dacă e nevoie): comanda `adb shell dpm remove-active-admin ...`
   de mai sus, sau oprește comutatorul din aplicație.

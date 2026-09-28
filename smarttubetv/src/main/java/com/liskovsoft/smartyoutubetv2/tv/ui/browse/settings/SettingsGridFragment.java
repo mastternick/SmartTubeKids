@@ -12,7 +12,9 @@ import androidx.leanback.widget.VerticalGridPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.SettingsGroup;
 import com.liskovsoft.smartyoutubetv2.common.app.models.data.SettingsItem;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.MainUIData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
@@ -130,8 +132,16 @@ public class SettingsGridFragment extends GridFragment implements SettingsSectio
             if (item instanceof SettingsItem) {
                 String password = getGeneralData().getSettingsPassword();
 
+                // KIDS v1.2.7: when the Settings password is the Kids PIN (auto-synced),
+                // route the gate through KidsPinGate so entering the PIN once unlocks the
+                // whole parent session (every Settings item + the Kids Mode dialog).
+                // Before, this prompt fired again on the next item — asking the same PIN twice.
+                KidsModeData kidsData = KidsModeData.instance(getContext());
+
                 if (password == null) {
                     ((SettingsItem) item).onClick.run();
+                } else if (kidsData.isPinEnabled() && password.equals(kidsData.getPin())) {
+                    KidsPinGate.runWhenUnlocked(getContext(), ((SettingsItem) item).onClick);
                 } else {
                     SimpleEditDialog.showPassword(
                             getContext(),

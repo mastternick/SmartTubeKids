@@ -10,12 +10,12 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
-import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -90,20 +90,14 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                 getContext().getString(R.string.kids_mode_enable),
                 option -> {
                     if (!option.isSelected() && mKidsData.isPinEnabled()) {
-                        // Ask for the PIN before turning Kids Mode off
+                        // KIDS v1.2.7: ask for the PIN at most once per parent session
+                        // (KidsPinGate). Before, this prompt appeared even right after
+                        // the same PIN was entered to open Settings.
                         dialogPresenter.closeDialog();
-                        SimpleEditDialog.showPassword(
-                                getContext(),
-                                getContext().getString(R.string.kids_enter_pin),
-                                null,
-                                newValue -> {
-                                    if (Utils.passwordMatch(mKidsData.getPin(), newValue)) {
-                                        enableKidsMode(false);
-                                        MessageHelpers.showMessage(getContext(), R.string.kids_mode_disabled);
-                                        return true;
-                                    }
-                                    return false;
-                                });
+                        KidsPinGate.runWhenUnlocked(getContext(), () -> {
+                            enableKidsMode(false);
+                            MessageHelpers.showMessage(getContext(), R.string.kids_mode_disabled);
+                        });
                     } else {
                         enableKidsMode(option.isSelected());
                         MessageHelpers.showMessage(getContext(),
@@ -124,24 +118,11 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
 
     /**
      * Shows the Kids Mode dialog, asking for PIN first if PIN protection is active.
+     * KIDS v1.2.7: the prompt goes through KidsPinGate, so a PIN entered anywhere
+     * else (e.g. to open the Settings list) counts here too — one unlock per session.
      */
     public void show(Runnable onFinish) {
-        if (mKidsData.isPinEnabled()) {
-            SimpleEditDialog.showPassword(
-                    getContext(),
-                    getContext().getString(R.string.kids_enter_pin),
-                    null,
-                    newValue -> {
-                        if (Utils.passwordMatch(mKidsData.getPin(), newValue)) {
-                            showDialog(onFinish);
-                            return true;
-                        }
-                        return false;
-                    },
-                    onFinish);
-        } else {
-            showDialog(onFinish);
-        }
+        KidsPinGate.runWhenUnlocked(getContext(), () -> showDialog(onFinish));
     }
 
     public void show() {
