@@ -756,4 +756,6 @@
         <item quantity="one">%s second</item>
         <item quantity="other">%s seconds</item>
     </plurals>
+    <string name="kiosk_mode">Kiosk mode</string>
+    <string name="kiosk_mode_desc">Locks the device to this app: blocks HOME, RECENTS and notifications and starts the app automatically after reboot. A settings password will be required: the password protected settings is the only way to turn it off. For full blocking make the app Device Owner via a one time adb command, otherwise the system screen pinning is used</string>
 </resources>

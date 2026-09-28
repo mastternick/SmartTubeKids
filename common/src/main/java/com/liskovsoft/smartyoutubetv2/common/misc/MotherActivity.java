@@ -220,6 +220,9 @@ public class MotherActivity extends FragmentActivity {
 
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();
+
+        // Kiosk mode: re-apply the lock (Device Owner lock task or screen pinning) on each resume
+        KioskManager.instance(this).applyOnResume(this);
     }
 
     @Override

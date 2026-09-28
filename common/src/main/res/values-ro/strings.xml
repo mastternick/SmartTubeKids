@@ -664,4 +664,6 @@
   <string name="local_backup">Copie de rezervă locală</string>
   <string name="auto_backup">Copie de rezervă automată (o dată pe zi)</string>
   <string name="repeat_mode_reverse_list">Redă lista de redare sau videoclipurile canalului în ordine inversă</string>
+  <string name="kiosk_mode">Mod kiosk</string>
+  <string name="kiosk_mode_desc">Blochează dispozitivul în această aplicație: dezactivează HOME, RECENTS și notificările și pornește aplicația automat după repornirea dispozitivului. Va fi necesară o parolă de setări: setările protejate cu parolă sunt singurul mod de dezactivare. Pentru blocare completă faceți aplicația Device Owner printr-o comandă adb unică, altfel se folosește fixarea ecranului din sistem</string>
 </resources>

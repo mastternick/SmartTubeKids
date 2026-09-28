@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kiosk (Lock Task) mode Device Admin declaration. -->
+<!-- Lock Task policies don't require explicit <uses-policies> entries, -->
+<!-- but this resource is mandatory for a DeviceAdminReceiver registration. -->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+</device-admin>

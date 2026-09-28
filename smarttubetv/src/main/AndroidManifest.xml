@@ -131,6 +131,21 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- Kiosk mode: HOME alias. Disabled by default, enabled by KioskManager when kiosk is on. -->
+        <!-- Don't add LAUNCHER categories here: KioskManager resolves the launcher activity by LEANBACK_LAUNCHER -->
+        <activity-alias android:label="@string/app_name"
+                        android:icon="@mipmap/app_icon"
+                        android:name="com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivityHome"
+                        android:exported="true"
+                        android:enabled="false"
+                        android:targetActivity="com.liskovsoft.smartyoutubetv2.tv.ui.main.SplashActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.HOME" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- noHistory is essential for dialogs. Because otherwise you'll see previous dialog content when opening. -->
         <!-- screenOrientation="behind" is important too. This fix crashes on Android 8 (api 26) and above, except few devices. -->
         <!-- More info about behind: https://stackoverflow.com/a/52426009/1279056 -->

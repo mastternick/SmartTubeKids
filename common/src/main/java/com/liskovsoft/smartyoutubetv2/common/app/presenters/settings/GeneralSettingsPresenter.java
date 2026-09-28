@@ -19,6 +19,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.ContextMenuManager;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.providers.ContextMenuProvider;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.service.SidebarService;
+import com.liskovsoft.smartyoutubetv2.common.misc.KioskManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
@@ -599,6 +600,26 @@ public class GeneralSettingsPresenter extends BasePresenter<Void> {
                     }
                 },
                 mGeneralData.isChildModeEnabled()));
+
+        options.add(UiOptionItem.from(getContext().getString(R.string.kiosk_mode),
+                getContext().getString(R.string.kiosk_mode_desc),
+                option -> {
+                    if (option.isSelected()) {
+                        // Force the settings password creation before locking: the password protected
+                        // settings dialog is the only way to turn the kiosk mode off
+                        AppDialogUtil.showConfirmationDialog(getContext(), getContext().getString(R.string.kiosk_mode_desc),
+                                () -> showPasswordDialog(settingsPresenter, () -> {
+                                    KioskManager.instance(getContext()).enable();
+                                    settingsPresenter.closeDialog();
+                                }),
+                                settingsPresenter::closeDialog);
+                    } else {
+                        // Reaching this switch already requires the settings password (when it's set)
+                        KioskManager.instance(getContext()).disable();
+                        settingsPresenter.closeDialog();
+                    }
+                },
+                KioskManager.instance(getContext()).isKioskEnabled()));
 
         // Disable long press on buggy controllers.
         options.add(UiOptionItem.from(getContext().getString(R.string.disable_ok_long_press),
