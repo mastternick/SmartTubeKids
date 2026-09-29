@@ -668,7 +668,10 @@
   <!-- KIDS v1.2.8: traduceri pentru blocajul kiosk cu ieșire pe PIN -->
   <string name="kids_enter_pin">Introdu PIN-ul Kids Mode</string>
   <string name="kids_kiosk_exit_blocked">Mod kiosk activat: nu poți ieși din aplicație. Setează un PIN în Kids Mode pentru ieșire cu PIN.</string>
-  <string name="kids_kiosk_enabled_pinned">Mod kiosk activat: tasta HOME este blocată. Apasă BACK și introdu PIN-ul pentru a ieși.</string>
+  <string name="kids_kiosk_enabled_pinned">Mod kiosk activat: tasta HOME este blocată, iar paznicul de ecran aduce aplicația înapoi automat. Apasă BACK și introdu PIN-ul pentru a ieși.</string>
+  <!-- KIDS v1.4: paznicul modului kiosk (soft lock) -->
+  <string name="kids_kiosk_watchdog_notification">Mod kiosk: paznicul de ecran este activ</string>
+  <string name="kids_kiosk_returning">SmartTube Kids rămâne blocat pe ecran.\nTe rugăm să aștepți, revinem în aplicație…</string>
   <!-- KIDS v1.3: setări pentru filtrarea barei laterale -->
   <string name="kids_visible_sections">Secțiuni vizibile</string>
   <string name="kids_allow_search">Permite căutarea</string>

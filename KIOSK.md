@@ -3,7 +3,10 @@
 Kiosk mode blocks the child from leaving the app: HOME / RECENTS keys stop working
 (system screen pinning — v1.2.8 — even without ADB), the BACK key only exits after
 the correct PIN, and with the Device Owner setup the app can be relaunched
-automatically after a TV reboot. The lock is turned off from
+automatically after a TV reboot. Since v1.4 a **screen guardian** (foreground
+service) additionally covers the launcher and pulls SmartTubeKids back on screen
+every second whenever the app ever loses it — so HOME, RECENTS and the unpin combo
+cannot put the child into another app. The lock is turned off from
 **Settings → Kids Mode → (PIN) → "Kiosk mode (block leaving the app)"**.
 
 There are two levels of protection:
@@ -12,11 +15,12 @@ There are two levels of protection:
 |---|---|---|
 | Requires | One-time ADB command (Device Owner) | Nothing |
 | Confirmation prompts | None, silent lock | None |
-| HOME / RECENTS | Blocked | Blocked on the current screen (system screen pinning); during internal navigation the pin is released and re-applied automatically |
+| HOME / RECENTS | Blocked | Blocked on the current screen (system screen pinning); if any window ever opens (unpin cycle, BACK+HOME combo), the v1.4 guardian covers the launcher and brings the app back ~1 s later |
 | BACK key | PIN-protected exit: asks for the PIN, correct PIN exits the app | PIN-protected exit: asks for the PIN, correct PIN exits the app (without a PIN set: never exits) |
+| Other apps reachable? | No | Only under the guardian cover for ~1–2 s, with no key input reaching them |
 | Playback / Settings inside the app | Fully working | Fully working (v1.2.8 auto-unpins before each navigation) |
 | After TV reboot | App launches directly, re-locks itself | Normal launcher start; app returns on its own once opened |
-| Child can escape? | No (only the PIN switch / exit with PIN) | Only momentarily: the system unpin combo (BACK+HOME hold) — the app re-pins on the next key press and climbs back ~2 s after losing the screen |
+| Child can escape? | No (only the PIN switch / exit with PIN) | No sustained escape: any loss of screen is covered and undone by the guardian (it releases itself after ~45 s only if the app itself cannot start — broken-install safety valve) |
 
 > **Screen pinning vs navigation (the v1.2.6 → v1.2.8 story).** This app runs every
 > screen in its own task (`launchMode=singleInstance`). System screen pinning
@@ -80,12 +84,24 @@ Just enable **Kiosk mode** in Kids Mode settings. The current screen is pinned b
 the system, so HOME / RECENTS do nothing, while clips, Settings and dialogs keep
 working: the pin is released moments before every internal navigation and
 re-applied on the new screen. BACK asks for the PIN — only the correct PIN exits
-the app. If the child uses the system unpin combo (BACK+HOME hold), the app
-re-pins on the next key press; if it still loses the screen, it climbs back after
-~2 seconds. Weaker than Option A — quick windows exist between unpin and re-pin,
-and on Android 10+ the system may refuse the background return — but it needs no
-setup. Set the Kids **PIN** too, otherwise BACK has no exit path at all.
-Use Option A whenever possible.
+the app. If the child uses the system unpin combo (BACK+HOME hold) or the pin
+window ever opens, the **v1.4 screen guardian** takes over: a foreground service
+relaunches the app every second and, while it isn't on top yet, a fullscreen
+cover hides and swallows input on whatever is behind (the launcher, another app).
+The child never operates another app — only the cover is briefly visible.
+Still weaker than Option A (a ~1–2 s visual window exists while the guardian
+climbs back), but no escape is sustained. Set the Kids **PIN** too, otherwise
+BACK has no exit path at all. Use Option A whenever possible.
+
+> **Guardian details (v1.4, `KioskWatchdogService`).** Armed from
+> `MotherActivity.onStop` (`KioskModeManager.scheduleReentry`), idles/stops when
+> the app is on screen again, kiosk is switched off, playback is in PIP, the
+> screen is off, or the parent left with the PIN (15 s grace). It needs the
+> *Draw over other apps* permission, which Android TV grants automatically at
+> install (`SYSTEM_ALERT_WINDOW` is a normal permission on TV); if a device
+> refuses it, the climb-back loop still runs without the visual cover. As a
+> broken-install safety valve it stops covering after ~45 s of failed relaunches,
+> so a TV can never be left unusable by the guardian itself.
 
 ## Exiting kiosk
 
@@ -114,9 +130,16 @@ porni direct după repornirea TV-ului. Dezactivarea se face din
   HOME/RECENTS sunt blocate, iar clipurile, Setările și dialogurile funcționează
   pentru că fixarea se eliberează chiar înainte de fiecare navigare internă și se
   reaplică automat pe ecranul nou. BACK cere PIN-ul; doar PIN-ul corect scoate
-  aplicația. Dacă copilul folosește combo-ul de deblocare al sistemului (BACK+HOME
-  ținut), aplicația re-fixează la următoarea apăsare de tastă și revine pe ecran în
-  ~2 secunde dacă a pierdut ecranul. Fără PIN setat, BACK rămâne complet blocat.
+  aplicația. Iar din v1.4, dacă aplicația pierde ecranul oricum (combo-ul
+  BACK+HOME ținut sau fereastra de deblocare), **paznicul de ecran**
+  (`KioskWatchdogService`, serviciu foreground) o repornește în fiecare secundă
+  și acoperă launcherul cu un ecran „întorcem în aplicație…" care absoarbe toate
+  apăsările de taste — copilul nu poate folosi nicio altă aplicație, doar vede
+  acoperirea ~1–2 secunde până revine SmartTubeKids. Fără PIN setat, BACK rămâne
+  complet blocat. (Permisunea „suprapunere peste alte aplicații" este acordată
+  automat de Android TV la instalare; dacă un dispozitiv o refuză, repornirea
+  automată continuă fără acoperire. Siguranță anti-blocare: dacă aplicația nu
+  reușește deloc să revină pe ecran timp de ~45 s, paznicul eliberează ecranul.)
 - Activează **PIN-ul** înainte de kiosk — fără PIN nu există ieșire din aplicație
   cu BACK, altfel copilul poate opri și comutatorul din Kids Mode.
 - Anularea device owner (dacă e nevoie): comanda `adb shell dpm remove-active-admin ...`

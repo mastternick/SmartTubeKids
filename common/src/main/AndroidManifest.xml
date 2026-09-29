@@ -81,6 +81,15 @@
         <service
             android:name="com.liskovsoft.smartyoutubetv2.common.misc.BackgroundPlaybackService"
             android:enabled="true"/>
+        <!-- KIDS v1.4: kiosk soft-lock guardian. While kiosk is ON without Device
+             Owner and the app is off screen, this service relaunches it every second
+             and (when allowed) covers the launcher with a fullscreen overlay until
+             SmartTubeKids is back on top. SYSTEM_ALERT_WINDOW is auto-granted on
+             Android TV at install time. -->
+        <service
+            android:name="com.liskovsoft.smartyoutubetv2.common.misc.KioskWatchdogService"
+            android:enabled="true"
+            android:exported="false"/>
 
         <activity android:name=".misc.BackupReceiverActivity"
             android:exported="true">

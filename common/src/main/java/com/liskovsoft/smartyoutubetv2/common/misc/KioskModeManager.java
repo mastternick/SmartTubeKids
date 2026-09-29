@@ -41,7 +41,9 @@ import java.lang.ref.WeakReference; // KIDS v1.2.8
  *    (notifyParentExit opens a grace window so the soft lock doesn't drag the
  *    app back). If the child drops the pin with the system combo (BACK+HOME
  *    hold), the next key press re-pins (ensureLockOnKeyPress); if the app still
- *    loses the screen, scheduleReentry climbs back on its own.
+ *    loses the screen, KioskWatchdogService climbs back on its own — every
+ *    second, with a fullscreen cover on top of the launcher (KIDS v1.4), so
+ *    HOME leaks during the unpin/re-pin cycle are closed automatically.
  *
  * v1.2.7 history: this app runs every activity as launchMode=singleInstance —
  * each one in its own task (Browse, Playback, dialogs...). System screen pinning
@@ -155,6 +157,7 @@ public class KioskModeManager {
             }
 
             sLockRequestedInProcess = false;
+            stopWatchdog(activity); // KIDS v1.4: switch OFF removes the guardian immediately
         } catch (Throwable e) {
             Log.e(TAG, e);
         }
@@ -183,6 +186,8 @@ public class KioskModeManager {
             } else {
                 clearDeviceOwnerPolicies(activity); // no-op unless DO policies are still set
             }
+
+            stopWatchdog(activity); // KIDS v1.4: the app is on screen again — guardian idles until the next onStop
         } catch (Throwable e) {
             Log.e(TAG, e);
         }
@@ -208,6 +213,13 @@ public class KioskModeManager {
             }
 
             final Context context = activity.getApplicationContext();
+
+            // KIDS v1.4: the one-shot climb-back below is not enough — pin release
+            // windows and the BACK+HOME unpin combo can leave the child on the
+            // launcher. The watchdog keeps relaunching every second and covers the
+            // screen until the app is back on top (no-op during the PIN exit grace,
+            // it checks all the same guards itself).
+            startWatchdog(activity);
 
             Utils.postDelayed(() -> {
                 try {
@@ -274,6 +286,7 @@ public class KioskModeManager {
     public static void notifyParentExit(Context context) {
         sExitGraceUntilMs = System.currentTimeMillis() + EXIT_GRACE_MS;
         releaseForNavigation(context);
+        stopWatchdog(context); // KIDS v1.4: the parent is leaving on purpose — no cover, no drag-back
     }
 
     /**
@@ -302,7 +315,38 @@ public class KioskModeManager {
         }
     }
 
-    private static boolean isInPipPlayback(Context context) {
+    /**
+     * KIDS v1.4: true while the parent-approved PIN exit window is open
+     * (scheduleReentry / auto-lock / watchdog stay quiet).
+     */
+    public static boolean isInExitGrace() {
+        return System.currentTimeMillis() < sExitGraceUntilMs;
+    }
+
+    /**
+     * KIDS v1.4: soft-lock guardian. Started from scheduleReentry (MotherActivity.onStop)
+     * whenever kiosk is ON without Device Owner; stopped whenever the app is back on
+     * screen, kiosk goes off, or the parent exits with the PIN. Guarded both ways:
+     * lifecycle paths must never throw.
+     */
+    private static void startWatchdog(Context context) {
+        try {
+            Utils.startService(context, KioskWatchdogService.class);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+    }
+
+    private static void stopWatchdog(Context context) {
+        try {
+            Utils.stopService(context, KioskWatchdogService.class);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+    }
+
+    // KIDS v1.4: package-visible (KioskWatchdogService reuses both guards).
+    static boolean isInPipPlayback(Context context) {
         try {
             return com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter
                     .instance(context).isInPipMode();
@@ -311,7 +355,7 @@ public class KioskModeManager {
         }
     }
 
-    private static boolean isScreenInteractive(Context context) {
+    static boolean isScreenInteractive(Context context) {
         try {
             android.os.PowerManager pm = (android.os.PowerManager)
                     context.getSystemService(Context.POWER_SERVICE);
