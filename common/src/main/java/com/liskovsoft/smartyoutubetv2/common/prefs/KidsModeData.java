@@ -33,6 +33,8 @@ public class KidsModeData {
     private String mKidsPlaylists;         // KIDS: selected account playlists, "playlistId|title" entries, list-delim separated
     private List<String> mKidsPlaylistList = new ArrayList<>(); // KIDS: parsed view of mKidsPlaylists
     private boolean mIsKioskEnabled;       // KIDS: kiosk mode (Lock Task) - child cannot leave the app
+    private String mHiddenPins;            // KIDS F4: snapshot of parent pins hidden while Kids Mode is on ("id|title" entries)
+    private List<String> mHiddenPinsList = new ArrayList<>(); // KIDS F4: parsed view of mHiddenPins
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -262,6 +264,23 @@ public class KidsModeData {
         persistData();
     }
 
+    // --- Hidden parent pins (KIDS F4) ---
+
+    /**
+     * KIDS F4: snapshot of the parent's pinned sidebar items (playlists/channels)
+     * hidden while Kids Mode is on. Entries: "id|title" (id = playlistId OR channelId).
+     * Items are re-pinned and the snapshot cleared when Kids Mode goes off.
+     */
+    public List<String> getHiddenPins() {
+        return mHiddenPinsList;
+    }
+
+    public void setHiddenPins(List<String> pins) {
+        mHiddenPinsList = pins != null ? new ArrayList<>(pins) : new ArrayList<>();
+        mHiddenPins = Helpers.mergeList(mHiddenPinsList);
+        persistData();
+    }
+
     // --- Daily counters ---
 
     public String getDailyDate() {
@@ -320,6 +339,8 @@ public class KidsModeData {
         mKidsPlaylists        = Helpers.parseStr(split, 14);
         mKidsPlaylistList     = new ArrayList<>(Helpers.parseStrList(split, 14));
         mIsKioskEnabled       = Helpers.parseBoolean(split, 15, false); // KIDS: kiosk default OFF
+        mHiddenPins           = Helpers.parseStr(split, 16); // KIDS F4: hidden parent pins snapshot
+        mHiddenPinsList       = new ArrayList<>(Helpers.parseStrList(split, 16));
     }
 
     private void persistData() {
@@ -328,6 +349,6 @@ public class KidsModeData {
                         mBlockShorts, mBlockRecommendations, mCalmExit,
                         mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
-                        mIsKioskEnabled));
+                        mIsKioskEnabled, mHiddenPins));
     }
 }

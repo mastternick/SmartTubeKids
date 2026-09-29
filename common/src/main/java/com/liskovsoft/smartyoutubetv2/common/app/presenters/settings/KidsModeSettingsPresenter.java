@@ -2,8 +2,11 @@ package com.liskovsoft.smartyoutubetv2.common.app.presenters.settings;
 
 import android.app.Activity;
 import android.content.Context;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaGroup; // KIDS
+import com.liskovsoft.mediaserviceinterfaces.data.MediaItem; // KIDS
 import com.liskovsoft.sharedutils.helpers.MessageHelpers; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.R;
+import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.controllers.KidsModeController;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem;
@@ -12,7 +15,9 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsSidebarManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
+import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
@@ -133,6 +138,9 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         AppDialogPresenter settingsPresenter = AppDialogPresenter.instance(getContext());
 
         appendEnableSwitch(settingsPresenter);
+        appendVisibleSectionsCategory(settingsPresenter); // AC1: tabs visible to the child
+        appendAllowSearchSwitch(settingsPresenter);       // AC4: search top button
+        appendSelectPlaylistsButton(settingsPresenter);   // kids playlists picker
         appendKioskSwitch(settingsPresenter); // KIDS: block leaving the app
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
@@ -151,6 +159,110 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                 getContext().getString(R.string.kids_mode_desc),
                 option -> enableKidsMode(option.isSelected()),
                 mKidsData.isEnabled()));
+    }
+
+    /**
+     * KIDS AC1: which sidebar tabs the child sees while Kids Mode is on.
+     * Default (first open): My videos + Playlists; Settings is always shown separately.
+     */
+    private void appendVisibleSectionsCategory(AppDialogPresenter settingsPresenter) {
+        final int[][] sections = {
+                {R.string.header_home, MediaGroup.TYPE_HOME},
+                {R.string.header_trending, MediaGroup.TYPE_TRENDING},
+                {R.string.header_subscriptions, MediaGroup.TYPE_SUBSCRIPTIONS},
+                {R.string.header_history, MediaGroup.TYPE_HISTORY},
+                {R.string.my_videos, MediaGroup.TYPE_MY_VIDEOS},
+                {R.string.header_playlists, MediaGroup.TYPE_USER_PLAYLISTS}
+        };
+
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int[] pair : sections) {
+            final int sectionId = pair[1];
+
+            options.add(UiOptionItem.from(
+                    getContext().getString(pair[0]),
+                    option -> {
+                        // MUST run first: writing bits into the raw -1 would show EVERYTHING
+                        KidsSidebarManager.ensureConfigured(mKidsData);
+                        mKidsData.setSectionVisible(sectionId, option.isSelected());
+                        // applyKidsState, not forceApply: checking a box while Kids is OFF
+                        // must not rewrite the user's own sidebar
+                        KidsSidebarManager.applyKidsState(getContext());
+                    },
+                    KidsSidebarManager.isSectionCheckedForUI(mKidsData, sectionId)));
+        }
+
+        settingsPresenter.appendCheckedCategory(getContext().getString(R.string.kids_visible_sections), options);
+    }
+
+    /**
+     * KIDS AC4: allow/hide the Search top button while Kids Mode is on.
+     */
+    private void appendAllowSearchSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_allow_search),
+                getContext().getString(R.string.kids_allow_search_desc),
+                option -> {
+                    mKidsData.setSearchEnabled(option.isSelected());
+                    KidsSidebarManager.applyKidsState(getContext());
+                },
+                mKidsData.isSearchEnabled()));
+    }
+
+    /**
+     * KIDS: opens the account-playlists picker; the chosen playlists are pinned
+     * on top of the kids sidebar. Everything else the parent had pinned is hidden
+     * while Kids Mode is on (F4=a) and comes back when it goes off.
+     */
+    private void appendSelectPlaylistsButton(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.kids_select_playlists),
+                getContext().getString(R.string.kids_select_playlists_desc),
+                option -> {
+                    settingsPresenter.closeDialog();
+                    loadAndShowPlaylistPicker();
+                }));
+    }
+
+    private void loadAndShowPlaylistPicker() {
+        // MediaServiceManager owns the subscription (disposes the previous one, main thread)
+        MediaServiceManager.instance().loadPlaylists(new Video(), group -> {
+            List<OptionItem> options = new ArrayList<>();
+
+            if (group != null && group.getMediaItems() != null) {
+                for (MediaItem item : group.getMediaItems()) {
+                    final String playlistId = item != null ? item.getPlaylistId() : null;
+
+                    if (playlistId == null || playlistId.isEmpty()) {
+                        continue;
+                    }
+
+                    final String title = item.getTitle();
+
+                    options.add(UiOptionItem.from(title,
+                            option -> {
+                                if (option.isSelected()) {
+                                    mKidsData.addPlaylist(playlistId, title);
+                                } else {
+                                    mKidsData.removePlaylist(playlistId);
+                                }
+
+                                KidsSidebarManager.applyKidsState(getContext());
+                            },
+                            mKidsData.isPlaylistSelected(playlistId)));
+                }
+            }
+
+            if (options.isEmpty()) { // signed out / no playlists = message, not an empty dialog
+                MessageHelpers.showMessage(getContext(), R.string.kids_no_playlists_found);
+                return;
+            }
+
+            AppDialogPresenter picker = AppDialogPresenter.instance(getContext());
+            picker.appendCheckedCategory(getContext().getString(R.string.kids_pick_playlists), options);
+            picker.showDialog();
+        });
     }
 
     /**
@@ -330,6 +442,9 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         mKidsData.setEnabled(enable);
         syncSettingsPassword();
         refreshRestrictions();
+        // AC1/AC2/AC5: apply immediately; OFF = normal display. ALL toggle paths
+        // (dialog, player quick-switch, setEnabledFromPlayer) go through here.
+        KidsSidebarManager.forceApply(getContext());
     }
 
     /**

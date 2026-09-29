@@ -795,4 +795,12 @@
     <string name="kids_kiosk_disabled">Kiosk mode disabled</string>
     <string name="kids_kiosk_exit_blocked">Kiosk mode is on: you cannot exit. Set a Kids Mode PIN to enable exit with PIN.</string>
     <string name="kids_kiosk_unsupported">Kiosk mode requires Android 5.0 or newer</string>
+    <!-- KIDS v1.3: sidebar filtering settings -->
+    <string name="kids_visible_sections">Visible sections</string>
+    <string name="kids_allow_search">Allow search</string>
+    <string name="kids_allow_search_desc">Show the Search button on the top panel while Kids Mode is on</string>
+    <string name="kids_select_playlists">Select playlists for the child</string>
+    <string name="kids_select_playlists_desc">Chosen playlists are pinned on top of the sidebar. Channels and playlists you pinned yourself stay hidden while Kids Mode is on and return when it is off</string>
+    <string name="kids_pick_playlists">Playlists for the child</string>
+    <string name="kids_no_playlists_found">No playlists found. Sign in to your account or create a playlist first</string>
 </resources>

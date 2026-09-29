@@ -84,13 +84,10 @@ public class SidebarService implements ProfileChangeListener {
 
         Video item = mPinnedItems.remove(from);
 
-        int idx = Helpers.indexOfFirst(mPinnedItems, obj -> obj.getId() > RESERVED_ID);
-
-        if (idx == -1) {
-            mPinnedItems.add(item);
-        } else {
-            mPinnedItems.add(idx, item);
-        }
+        // KIDS: old insertion point ("before the first id > RESERVED_ID") sent kids playlists to
+        // the END because their hash-based ids are frequently below RESERVED_ID. Absolute top is
+        // what "move to top" must mean for the kids-playlist ordering to work.
+        mPinnedItems.add(0, item);
 
         persistState();
     }

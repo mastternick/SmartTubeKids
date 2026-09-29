@@ -10,6 +10,7 @@
   <string name="header_playlists">Liste de redare</string>
   <string name="header_settings">Setări</string>
   <string name="header_channels">Canale</string>
+  <string name="my_videos">Videoclipurile mele</string>
   <string name="subscriptions_signin_title">Cele mai noi videoclipuri din canalele la care ești abonat</string>
   <string name="subscriptions_signin_subtitle">Autentifică-te pentru a vedea abonările</string>
   <string name="subscriptions_signin_button_text">Conectează-te</string>
@@ -668,4 +669,12 @@
   <string name="kids_enter_pin">Introdu PIN-ul Kids Mode</string>
   <string name="kids_kiosk_exit_blocked">Mod kiosk activat: nu poți ieși din aplicație. Setează un PIN în Kids Mode pentru ieșire cu PIN.</string>
   <string name="kids_kiosk_enabled_pinned">Mod kiosk activat: tasta HOME este blocată. Apasă BACK și introdu PIN-ul pentru a ieși.</string>
+  <!-- KIDS v1.3: setări pentru filtrarea barei laterale -->
+  <string name="kids_visible_sections">Secțiuni vizibile</string>
+  <string name="kids_allow_search">Permite căutarea</string>
+  <string name="kids_allow_search_desc">Afișează butonul Căutare în panoul de sus cât timp Kids Mode este activ</string>
+  <string name="kids_select_playlists">Selectează playlisturi pentru copil</string>
+  <string name="kids_select_playlists_desc">Playlisturile alese sunt fixate în vârful barei laterale. Canalele și playlisturile fixate de tine rămân ascunse cât timp Kids Mode este activ și revin când îl oprești</string>
+  <string name="kids_pick_playlists">Playlisturi pentru copil</string>
+  <string name="kids_no_playlists_found">Nu s-a găsit niciun playlist. Conectează-te la cont sau creează mai întâi un playlist</string>
 </resources>

@@ -60,7 +60,13 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         boolean blockShorts = mKidsData.isBlockShortsActive();
         MediaServiceData.instance().setContentHidden(MediaServiceData.CONTENT_SHORTS_ALL, blockShorts);
-        BrowsePresenter.instance(getContext()).enableSection(MediaGroup.TYPE_SHORTS, !blockShorts);
+
+        // KIDS AC3: hide the Shorts tab only while Kids Mode is ON (the block-shorts switch
+        // itself just filters content). With Kids OFF the controller no longer touches the tab,
+        // so the user's manual sidebar setup is kept (the old line force-enabled Shorts).
+        if (mKidsData.isEnabled()) {
+            BrowsePresenter.instance(getContext()).enableSection(MediaGroup.TYPE_SHORTS, false);
+        }
     }
 
     @Override
