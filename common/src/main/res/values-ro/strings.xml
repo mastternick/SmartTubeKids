@@ -664,4 +664,8 @@
   <string name="local_backup">Copie de rezervă locală</string>
   <string name="auto_backup">Copie de rezervă automată (o dată pe zi)</string>
   <string name="repeat_mode_reverse_list">Redă lista de redare sau videoclipurile canalului în ordine inversă</string>
+  <!-- KIDS v1.2.8: traduceri pentru blocajul kiosk cu ieșire pe PIN -->
+  <string name="kids_enter_pin">Introdu PIN-ul Kids Mode</string>
+  <string name="kids_kiosk_exit_blocked">Mod kiosk activat: nu poți ieși din aplicație. Setează un PIN în Kids Mode pentru ieșire cu PIN.</string>
+  <string name="kids_kiosk_enabled_pinned">Mod kiosk activat: tasta HOME este blocată. Apasă BACK și introdu PIN-ul pentru a ieși.</string>
 </resources>

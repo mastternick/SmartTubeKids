@@ -9,6 +9,7 @@ import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.autoframerate.ModeSyncManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.GlobalKeyTranslator;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS v1.2.8
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MotherActivity;
 import com.liskovsoft.smartyoutubetv2.common.misc.PlayerKeyTranslator;
@@ -51,6 +52,11 @@ public abstract class LeanbackActivity extends MotherActivity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         Log.d(TAG, event);
+
+        // KIDS v1.2.8: re-pin if the pin was dropped by the system combo (BACK+HOME hold)
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            KioskModeManager.ensureLockOnKeyPress(this);
+        }
 
         KeyEvent newEvent = mGlobalKeyTranslator.translate(event);
         return super.dispatchKeyEvent(newEvent);
@@ -97,10 +103,18 @@ public abstract class LeanbackActivity extends MotherActivity {
         // user pressed back key
         if (!getViewManager().hasParentView(this)) {
             // KIDS: kiosk mode — the child must not be able to exit the app with BACK.
-            // Swallow the exit and stay on the current (root) screen.
             // NOTE: internal finishReally() calls super.finish() and bypass this override.
             if (KioskModeManager.isKioskEnabled(this)) {
-                MessageHelpers.showMessage(this, com.liskovsoft.smartyoutubetv2.common.R.string.kids_kiosk_exit_blocked);
+                // KIDS v1.2.8: parintele poate iesi — BACK cere PIN (o data pe sesiune, prin KidsPinGate).
+                // PIN corect = deblocheaza + iese din aplicatie. Fara PIN setat = blocat hard.
+                if (KidsPinGate.isProtected(this)) {
+                    KidsPinGate.runWhenUnlocked(this, () -> {
+                        KioskModeManager.notifyParentExit(this);
+                        finishTheApp();
+                    });
+                } else {
+                    MessageHelpers.showMessage(this, com.liskovsoft.smartyoutubetv2.common.R.string.kids_kiosk_exit_blocked);
+                }
                 return;
             }
 

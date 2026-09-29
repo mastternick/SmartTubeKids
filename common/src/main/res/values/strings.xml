@@ -789,10 +789,10 @@
     <string name="kids_mode_enabled">Kids Mode enabled</string>
     <string name="kids_mode_disabled">Kids Mode disabled</string>
     <string name="kids_kiosk_mode">Kiosk mode (block leaving the app)</string>
-    <string name="kids_kiosk_mode_desc">The child cannot leave the app: the BACK key never exits and the app climbs back on screen when HOME is pressed (soft lock). With the one-time ADB device-owner setup (see KIOSK.md) the lock is FULL: HOME/RECENTS are blocked silently and the app starts itself after a reboot. Enable PIN protection so only the parent can turn this off.</string>
+    <string name="kids_kiosk_mode_desc">Kiosk mode: the child cannot leave the app. HOME/RECENTS are blocked by system screen pinning; BACK asks for the PIN and only the correct PIN lets you exit. With the one-time ADB device-owner setup (KIOSK.md) the lock becomes FULL and survives reboots.</string>
     <string name="kids_kiosk_enabled_full">Kiosk mode: full lock applies when you close these settings</string>
-    <string name="kids_kiosk_enabled_pinned">Kiosk mode (soft lock): BACK is blocked and the app comes back on screen after leaving it. Full lock (blocks HOME too): see KIOSK.md</string>
+    <string name="kids_kiosk_enabled_pinned">Kiosk mode enabled: HOME is blocked. Press BACK and enter the PIN to leave the app.</string>
     <string name="kids_kiosk_disabled">Kiosk mode disabled</string>
-    <string name="kids_kiosk_exit_blocked">Kiosk mode is on: the app cannot be exited</string>
+    <string name="kids_kiosk_exit_blocked">Kiosk mode is on: you cannot exit. Set a Kids Mode PIN to enable exit with PIN.</string>
     <string name="kids_kiosk_unsupported">Kiosk mode requires Android 5.0 or newer</string>
 </resources>

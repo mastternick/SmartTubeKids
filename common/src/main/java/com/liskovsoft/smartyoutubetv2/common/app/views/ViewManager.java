@@ -404,6 +404,10 @@ public class ViewManager {
      */
     private void safeStartActivityInt(Context context, Intent intent) {
         try {
+            // KIDS v1.2.8: drop the kiosk screen pin right before navigating, so the system
+            // doesn't refuse the launch into another singleInstance task (playback, Settings,
+            // dialogs). The new screen re-pins itself on its resume (KioskModeManager).
+            com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager.releaseForNavigation(context); // KIDS v1.2.8
             context.startActivity(intent);
         } catch (IllegalArgumentException | ActivityNotFoundException | IndexOutOfBoundsException | NullPointerException | SecurityException e) {
             // NPE: Attempt to write to field 'boolean com.android.server.am.ActivityStack.mConfigWillChange' on a null object reference

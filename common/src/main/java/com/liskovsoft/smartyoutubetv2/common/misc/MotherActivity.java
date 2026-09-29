@@ -200,6 +200,20 @@ public class MotherActivity extends FragmentActivity {
         }
     }
 
+    // KIDS v1.2.8: release the kiosk screen pin before leaving to ANY other screen.
+    // Covers launches that don't go through ViewManager (file pickers, external links...).
+    @Override
+    public void startActivity(Intent intent) {
+        com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager.releaseForNavigation(this); // KIDS v1.2.8
+        super.startActivity(intent);
+    }
+
+    @Override
+    public void startActivity(Intent intent, android.os.Bundle options) {
+        com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager.releaseForNavigation(this); // KIDS v1.2.8
+        super.startActivity(intent, options);
+    }
+
     @Override
     protected void attachBaseContext(Context context) {
         Context contextWrapper = null;
