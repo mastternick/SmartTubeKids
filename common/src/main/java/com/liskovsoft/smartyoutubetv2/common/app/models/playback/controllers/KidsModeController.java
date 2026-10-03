@@ -17,6 +17,7 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.youtubeapi.service.internal.MediaServiceData;
 
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 
@@ -34,6 +35,15 @@ import java.util.Locale;
  */
 public class KidsModeController extends BasePlayerController implements TickleManager.TickleListener {
     private static final String TAG = KidsModeController.class.getSimpleName();
+
+    // KIDS FIX: while playing, TickleManager fires every ~60s, so a real watched
+    // delta never exceeds ~1 min. Anything much bigger means the process was frozen
+    // (TV standby/doze), not the child watching — such gaps must never be counted.
+    // The old 12h guard let an entire overnight standby gap (< 12h) pass through and
+    // credited it to the NEW day right after the midnight reset — that is why the
+    // daily counter appeared to "not reset at 00:00" and the limit looked exhausted
+    // all day.
+    private static final long MAX_REAL_PLAY_GAP_MS = 3 * 60_000L;
 
     private KidsModeData mKidsData;
     private long mLastPlayStartMs; // 0 = not playing
@@ -72,7 +82,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     @Override
     public void onFinish() {
         TickleManager.instance().removeListener(this);
-        accumulatePlayTime();
+        stopCounting();
     }
 
     @Override
@@ -128,17 +138,20 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
     @Override
     public void onPause() {
-        accumulatePlayTime();
+        // KIDS FIX: paused time is not watched time — flush what was played and
+        // clear the marker, so a later wake-from-standby tickle can't credit the
+        // whole pause/standby period to the child (onPlay restarts counting).
+        stopCounting();
     }
 
     @Override
     public void onPlayEnd() {
-        accumulatePlayTime();
+        stopCounting();
     }
 
     @Override
     public void onEngineReleased() {
-        accumulatePlayTime();
+        stopCounting();
     }
 
     /**
@@ -206,6 +219,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return;
         }
 
+        // KIDS FIX: roll the day over even when nothing is playing, so warnings and
+        // the time-up message use the fresh daily quota right after local midnight.
+        resetDailyIfNeeded();
         accumulatePlayTime();
         checkWarnings();
     }
@@ -237,6 +253,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         return Math.max(0, getLimitMs() - mKidsData.getDailyUsedMs());
     }
 
+    private void stopCounting() {
+        accumulatePlayTime();
+        mLastPlayStartMs = 0; // KIDS FIX: never carry a stale marker across a pause/standby
+    }
+
     private void accumulatePlayTime() {
         if (mLastPlayStartMs == 0 || !isActive()) {
             mLastPlayStartMs = 0;
@@ -244,13 +265,33 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         }
 
         long now = System.currentTimeMillis();
-        long delta = now - mLastPlayStartMs;
+
+        // KIDS FIX: roll the day over first, then only count the part of the gap that
+        // falls inside today (local time). A session that crosses 00:00 must not push
+        // yesterday's minutes onto the new day's fresh counter.
+        resetDailyIfNeeded();
+        long start = Math.max(mLastPlayStartMs, getStartOfTodayMs(now));
+        long delta = now - start;
         mLastPlayStartMs = now; // keep counting if still playing
 
-        if (delta > 0 && delta < 12 * 60 * 60 * 1000L) { // sanity: ignore sleep/hibernate gaps
-            resetDailyIfNeeded();
+        if (delta > 0 && delta < MAX_REAL_PLAY_GAP_MS) {
             mKidsData.addDailyUsedMs(delta);
+        } else if (delta >= MAX_REAL_PLAY_GAP_MS) {
+            Log.d(TAG, "Ignoring non-play gap of %s ms (standby/frozen process)", delta);
         }
+    }
+
+    /**
+     * KIDS FIX: epoch millis of local midnight (00:00) of the day containing nowMs.
+     */
+    private long getStartOfTodayMs(long nowMs) {
+        Calendar cal = Calendar.getInstance(); // device local timezone
+        cal.setTimeInMillis(nowMs);
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        return cal.getTimeInMillis();
     }
 
     private void resetDailyIfNeeded() {
