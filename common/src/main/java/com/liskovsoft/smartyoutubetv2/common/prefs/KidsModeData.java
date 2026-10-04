@@ -35,6 +35,7 @@ public class KidsModeData {
     private boolean mIsKioskEnabled;       // KIDS: kiosk mode (Lock Task) - child cannot leave the app
     private String mHiddenPins;            // KIDS F4: snapshot of parent pins hidden while Kids Mode is on ("id|title" entries)
     private List<String> mHiddenPinsList = new ArrayList<>(); // KIDS F4: parsed view of mHiddenPins
+    private boolean mForceStopOnExpire;  // KIDS: stop the clip the moment the daily limit expires + stay on a PIN-locked black screen
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -141,6 +142,23 @@ public class KidsModeData {
 
     public void setCalmExit(boolean calmExit) {
         mCalmExit = calmExit;
+        persistData();
+    }
+
+    // --- Force stop on expire (KIDS) ---
+
+    /**
+     * KIDS: when ON, reaching the daily limit stops the current clip IMMEDIATELY
+     * (no "let the video finish" calm exit) and the screen stays black until the
+     * parent enters the Kids Mode PIN. Without an enabled PIN there is nothing to
+     * unlock the black screen, so the lock is not armed (see KidsScreenHelper).
+     */
+    public boolean isForceStopOnExpire() {
+        return mForceStopOnExpire;
+    }
+
+    public void setForceStopOnExpire(boolean forceStop) {
+        mForceStopOnExpire = forceStop;
         persistData();
     }
 
@@ -341,6 +359,7 @@ public class KidsModeData {
         mIsKioskEnabled       = Helpers.parseBoolean(split, 15, false); // KIDS: kiosk default OFF
         mHiddenPins           = Helpers.parseStr(split, 16); // KIDS F4: hidden parent pins snapshot
         mHiddenPinsList       = new ArrayList<>(Helpers.parseStrList(split, 16));
+        mForceStopOnExpire    = Helpers.parseBoolean(split, 17, false); // KIDS: force stop default OFF (calm exit stays)
     }
 
     private void persistData() {
@@ -349,6 +368,6 @@ public class KidsModeData {
                         mBlockShorts, mBlockRecommendations, mCalmExit,
                         mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
-                        mIsKioskEnabled, mHiddenPins));
+                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire));
     }
 }

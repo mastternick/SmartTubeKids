@@ -136,6 +136,18 @@ public class MotherActivity extends FragmentActivity {
             return true;
         }
 
+        // KIDS: force stop — the time-up screen is a GATE, not a transition. EVERY key
+        // event is consumed (DOWN and UP: BACK fires onBackPressed from the UP event, so
+        // swallowing only DOWN would let the child leave) and answered with the PIN
+        // dialog. Only the correct Kids Mode PIN removes the black screen.
+        if (KidsTimeUpLock.isLocked()) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                KidsTimeUpLock.onKeyPress(this);
+            }
+
+            return true;
+        }
+
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             // KIDS: first key press wakes up from the calm-exit black screen (and consumes the key)
             if (KidsScreenHelper.isBlackScreenShown(this)) {
@@ -259,6 +271,11 @@ public class MotherActivity extends FragmentActivity {
         // inside KioskModeManager; runs only here (on resume), never in constructors or
         // restoreState paths (lesson from the v1.2.0 black screen).
         KioskModeManager.applyOnResume(this);
+
+        // KIDS: force stop — keep the time-up screen covered across activity switches
+        // (the playback activity finished; this one must not show the playlist).
+        // In-memory flag only: nothing is locked after a process restart.
+        KidsTimeUpLock.applyOnResume(this);
 
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();

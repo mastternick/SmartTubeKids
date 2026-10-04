@@ -16,6 +16,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsSidebarManager; // KIDS
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
@@ -146,6 +147,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
         appendCalmExitSwitch(settingsPresenter);
+        appendForceStopSwitch(settingsPresenter); // KIDS: hard stop + PIN-locked black screen
         appendExtendTimeCategory(settingsPresenter);
         appendBrightnessCategory(settingsPresenter); // KIDS: brightness also in full settings
         appendPinCategory(settingsPresenter);
@@ -338,6 +340,48 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                 mKidsData.isCalmExit()));
     }
 
+    /**
+     * KIDS: "Stop immediately when time is up".
+     *
+     * OFF (default) = calm exit: the running clip finishes, then the screen fades to
+     * black and the first key press returns to the playlist.
+     * ON = the clip is cut the moment the daily limit expires and the screen STAYS
+     * black: every key press asks for the Kids Mode PIN, and only the correct PIN
+     * leaves that screen (no return to the playlist, no next video).
+     *
+     * Requires an enabled PIN — without one nobody could get past the black screen, so
+     * the switch offers to set the PIN first (see KidsTimeUpLock.isForceStopActive).
+     */
+    private void appendForceStopSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_force_stop),
+                getContext().getString(R.string.kids_force_stop_desc),
+                option -> {
+                    if (!option.isSelected()) {
+                        mKidsData.setForceStopOnExpire(false);
+                        return;
+                    }
+
+                    if (mKidsData.isPinEnabled()) {
+                        mKidsData.setForceStopOnExpire(true);
+                        return;
+                    }
+
+                    // No usable PIN: ask for one, arm protection, then turn the switch on.
+                    // Cancel/blank leaves the switch off (it is never enabled without a way out).
+                    settingsPresenter.closeDialog();
+                    MessageHelpers.showMessage(getContext(), R.string.kids_force_stop_needs_pin);
+                    showSetPinDialog(newValue -> {
+                        if (newValue != null) {
+                            setPinEnabled(true);
+                            mKidsData.setForceStopOnExpire(true);
+                            KidsPinGate.lock(); // a fresh PIN must be typed again to unlock
+                        }
+                    });
+                },
+                mKidsData.isForceStopOnExpire()));
+    }
+
     private void appendExtendTimeCategory(AppDialogPresenter settingsPresenter) {
         List<OptionItem> options = new ArrayList<>();
 
@@ -346,6 +390,9 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                     option -> {
                         mKidsData.setDailyBonusMs(mKidsData.getDailyBonusMs() + minutes * 60_000L);
                         AppDialogPresenter.instance(getContext()).closeDialog();
+                        // KIDS: more time granted — release a time-up lock and let the next
+                        // video play (the exact hard stop is re-armed by the controller).
+                        refreshAfterExtend();
                     }));
         }
 
@@ -445,6 +492,12 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         // AC1/AC2/AC5: apply immediately; OFF = normal display. ALL toggle paths
         // (dialog, player quick-switch, setEnabledFromPlayer) go through here.
         KidsSidebarManager.forceApply(getContext());
+
+        if (!enable) {
+            // KIDS: Kids Mode off = no gate. Drop the time-up lock and its overlay,
+            // otherwise the parent would stay on a black screen they just disabled.
+            KidsTimeUpLock.release(getContext() instanceof Activity ? (Activity) getContext() : null);
+        }
     }
 
     /**
@@ -486,6 +539,25 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         KidsModeController controller = playbackPresenter != null ? playbackPresenter.getController(KidsModeController.class) : null;
         if (controller != null) {
             controller.applyRestrictions();
+        }
+    }
+
+    /**
+     * KIDS: after "+N min" — clear the time-up gate and re-sync the controller so the
+     * extended quota takes effect immediately (warnings reset, hard stop re-scheduled).
+     */
+    private void refreshAfterExtend() {
+        KidsTimeUpLock.releaseStateOnly();
+
+        PlaybackPresenter playbackPresenter = PlaybackPresenter.instance(getContext());
+        KidsModeController controller = playbackPresenter != null ? playbackPresenter.getController(KidsModeController.class) : null;
+        if (controller != null) {
+            controller.onSessionExtended();
+        }
+
+        if (getContext() instanceof Activity) {
+            KidsScreenHelper.hideBlackScreen((Activity) getContext());
+            KidsScreenHelper.clearPendingScreenOff();
         }
     }
 }

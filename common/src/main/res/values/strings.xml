@@ -769,6 +769,10 @@
     <string name="kids_timer_off">No limit</string>
     <string name="kids_calm_exit">Calm exit warnings</string>
     <string name="kids_calm_exit_desc">Show friendly warnings 5, 2 and 1 minute before time is up</string>
+    <string name="kids_force_stop">Stop immediately when time is up</string>
+    <string name="kids_force_stop_desc">Cut the running clip the instant the daily limit expires. The screen goes black and stays black: every key press asks for the Kids Mode PIN, so the child cannot return to the playlist or start another video without it. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
+    <string name="kids_force_stop_needs_pin">Stopping immediately needs a PIN to leave the black screen. Set one now.</string>
+    <string name="kids_time_up_pin_hint">Time is up for today. Enter the PIN to continue.</string>
     <string name="kids_pin">PIN protection</string>
     <string name="kids_pin_enable">Enable PIN</string>
     <string name="kids_pin_enable_desc">Protect Kids Mode and all Settings with a PIN. Disabling takes effect immediately.</string>

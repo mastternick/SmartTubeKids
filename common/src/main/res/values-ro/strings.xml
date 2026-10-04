@@ -680,4 +680,9 @@
   <string name="kids_select_playlists_desc">Playlisturile alese sunt fixate în vârful barei laterale. Canalele și playlisturile fixate de tine rămân ascunse cât timp Kids Mode este activ și revin când îl oprești</string>
   <string name="kids_pick_playlists">Playlisturi pentru copil</string>
   <string name="kids_no_playlists_found">Nu s-a găsit niciun playlist. Conectează-te la cont sau creează mai întâi un playlist</string>
+  <!-- KIDS v1.5: oprire imediata la expirarea timpului + ecran negru blocat cu PIN -->
+  <string name="kids_force_stop">Oprește imediat când timpul expiră</string>
+  <string name="kids_force_stop_desc">Taie clipul în momentul în care expiră limita zilnică. Ecranul devine negru și rămâne negru: orice apăsare de tastă cere PIN-ul Kids Mode, deci copilul nu se poate întoarce la playlist și nu poate porni alt clip fără PIN. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
+  <string name="kids_force_stop_needs_pin">Oprirea imediată are nevoie de un PIN pentru a ieși din ecranul negru. Setează unul acum.</string>
+  <string name="kids_time_up_pin_hint">Timpul s-a terminat pe azi. Introdu PIN-ul pentru a continua.</string>
 </resources>

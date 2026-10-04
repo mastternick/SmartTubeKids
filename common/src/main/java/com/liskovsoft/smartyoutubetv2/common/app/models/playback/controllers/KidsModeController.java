@@ -11,6 +11,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerContr
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
 import com.liskovsoft.smartyoutubetv2.common.misc.TickleManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
@@ -28,6 +29,8 @@ import java.util.Locale;
  *  - Count real watch minutes per day (daily limit).
  *  - Calm exit warnings at -5 / -2 / -1 minutes before limit.
  *  - Hard stop: current video always finishes, then playback closes (no cliffhanger mid-video).
+ *  - KIDS force stop (optional): the clip is cut the instant the limit expires and the
+ *    screen stays black behind a PIN gate (see KidsTimeUpLock).
  *  - Block Shorts at open time when block-shorts is active.
  *
  * Design note: all persistent state lives in KidsModeData; this controller only
@@ -51,6 +54,10 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     private boolean mWarned2;
     private boolean mWarned1;
     private boolean mIsCalmExitInProgress; // KIDS: guard against double fade (onPlayEnd may fire twice)
+    // KIDS: exact hard-stop watchdog. Tickle granularity is one minute, which is too
+    // coarse for "stop immediately when the timer expires", so while the clip plays we
+    // also post a task for the exact remaining time (re-synced on every tickle/play).
+    private final Runnable mExpireTask = this::onTimerExpired;
 
     @Override
     public void onInit() {
@@ -83,6 +90,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     public void onFinish() {
         TickleManager.instance().removeListener(this);
         stopCounting();
+        Utils.removeCallbacks(mExpireTask);
     }
 
     @Override
@@ -100,6 +108,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         // KIDS: daily limit already reached — don't start new videos
         if (isTimeExpired()) {
+            if (isForceStopActive()) {
+                // KIDS: hard stop — never even start the clip, lock the screen instead
+                forceStopSession();
+                return;
+            }
+
             showTimeUpMessage();
             // KIDS: calm fade to black, then back to the previous screen (stays black)
             final Activity activity = getActivity();
@@ -117,6 +131,18 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
     @Override
     public void onVideoLoaded(Video item) {
+        // KIDS: a locked time-up screen must survive any load attempt — releasing it
+        // here would hand the child back the playlist without the PIN.
+        if (KidsTimeUpLock.isLocked()) {
+            // Keep it silent and get rid of the player (posted: the view may still init)
+            if (getPlayer() != null && getPlayer().isEngineInitialized()) {
+                getPlayer().setPlayWhenReady(false);
+            }
+
+            Utils.post(() -> PlaybackPresenter.instance(getContext()).forceFinish());
+            return;
+        }
+
         // KIDS: a new video woke us up - clear any calm-exit black screen state
         mIsCalmExitInProgress = false;
         Activity activity = getActivity();
@@ -133,6 +159,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     public void onPlay() {
         if (isActive()) {
             mLastPlayStartMs = System.currentTimeMillis();
+            scheduleForceStop(); // KIDS: paused time isn't counted, so (re)arm on every play
         }
     }
 
@@ -142,16 +169,19 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // clear the marker, so a later wake-from-standby tickle can't credit the
         // whole pause/standby period to the child (onPlay restarts counting).
         stopCounting();
+        cancelForceStop(); // KIDS: nothing is being watched, so nothing can expire
     }
 
     @Override
     public void onPlayEnd() {
         stopCounting();
+        cancelForceStop();
     }
 
     @Override
     public void onEngineReleased() {
         stopCounting();
+        cancelForceStop();
     }
 
     /**
@@ -182,6 +212,10 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * (playlist/browse) which stays black until the first key press.
      */
     public void onVideoSessionEnd() {
+        if (KidsTimeUpLock.isLocked()) {
+            return; // KIDS: force stop already ended the session, the screen is PIN-locked
+        }
+
         if (mIsCalmExitInProgress) {
             return; // fade already running
         }
@@ -189,6 +223,14 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         mIsCalmExitInProgress = true;
 
         accumulatePlayTime();
+
+        // KIDS: the clip ran to its natural end with the quota full and the hard stop
+        // armed (e.g. the switch was turned on mid-clip) → lock the screen exactly like
+        // the watchdog does, instead of the calm fade back to the playlist.
+        if (isTimeExpired() && isForceStopActive()) {
+            forceStopSession();
+            return;
+        }
 
         if (isTimeExpired()) {
             showTimeUpMessage();
@@ -224,12 +266,114 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         resetDailyIfNeeded();
         accumulatePlayTime();
         checkWarnings();
+
+        // KIDS: keep the exact hard-stop watchdog aligned with the freshly counted time
+        scheduleForceStop();
     }
 
     // --- Internals ---
 
     private boolean isActive() {
         return mKidsData != null && mKidsData.isEnabled() && mKidsData.getTimerMinutes() > 0;
+    }
+
+    /**
+     * KIDS: hard stop armed? Kids Mode on + "stop immediately" on + a PIN to unlock
+     * the black screen with (without a PIN the gate would trap everybody).
+     */
+    private boolean isForceStopActive() {
+        return KidsTimeUpLock.isForceStopActive(getContext());
+    }
+
+    /**
+     * KIDS: post the hard stop for the exact moment today's quota runs out.
+     * Re-armed on every play/tickle because paused time is not counted.
+     */
+    private void scheduleForceStop() {
+        Utils.removeCallbacks(mExpireTask);
+
+        // Only while a clip is actually playing: paused/standby time isn't counted, so
+        // there is no deadline to watch. No limit (timer = 0) = nothing can expire.
+        if (!isForceStopActive() || !isActive() || mLastPlayStartMs == 0) {
+            return;
+        }
+
+        long remainingMs = getRemainingMs();
+
+        if (remainingMs <= 0) {
+            onTimerExpired();
+        } else {
+            Utils.postDelayed(mExpireTask, remainingMs);
+            Log.d(TAG, "Hard stop scheduled in %s ms", remainingMs);
+        }
+    }
+
+    private void cancelForceStop() {
+        Utils.removeCallbacks(mExpireTask);
+    }
+
+    private void onTimerExpired() {
+        if (!isActive()) {
+            return;
+        }
+
+        // Flush the played delta but KEEP counting: stopCounting() would drop the marker
+        // and let the child watch on for free if the check below says "not expired yet".
+        accumulatePlayTime();
+
+        if (!isTimeExpired()) { // rounding / parent bonus added meanwhile
+            scheduleForceStop();
+            return;
+        }
+
+        forceStopSession();
+    }
+
+    /**
+     * KIDS force stop: cut the clip NOW (no "let the video finish"), go black and stay
+     * black behind the PIN gate — no return to the playlist, no next video.
+     */
+    private void forceStopSession() {
+        cancelForceStop();
+
+        final PlaybackPresenter presenter = PlaybackPresenter.instance(getContext());
+
+        if (KidsTimeUpLock.isLocked()) {
+            // Already cut and locked (e.g. another video was requested): keep the player down
+            presenter.forceFinish();
+            return;
+        }
+
+        stopCounting();
+        mIsCalmExitInProgress = true; // the calm-exit path must not fade a second time
+
+        // Arm the gate BEFORE the transition: a video that finishes loading during the
+        // ~2s fade (queued auto-next) must not clear the screen behind our back.
+        KidsTimeUpLock.armState();
+
+        showTimeUpMessage();
+
+        // Silence + freeze the picture before the fade, otherwise the clip keeps
+        // playing (audible) for the ~2s of the transition.
+        if (getPlayer() != null && getPlayer().isEngineInitialized()) {
+            getPlayer().setPlayWhenReady(false);
+        }
+
+        final Activity activity = getActivity();
+
+        Runnable lockAndFinish = () -> {
+            // Cover the screen, then leave the player: the resumed browse activity comes
+            // up covered too (KidsTimeUpLock.applyOnResume in MotherActivity), so the
+            // playlist is never visible and no key press escapes the gate.
+            KidsTimeUpLock.arm(activity);
+            presenter.forceFinish();
+        };
+
+        if (activity != null) {
+            KidsScreenHelper.fadeToBlack(activity, lockAndFinish);
+        } else {
+            lockAndFinish.run();
+        }
     }
 
     /**
@@ -302,6 +446,8 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             mKidsData.setDailyUsedMs(0);
             mKidsData.setDailyBonusMs(0);
             resetWarnings();
+            // KIDS: a new day means a fresh quota — never keep the child locked past midnight
+            KidsTimeUpLock.releaseStateOnly();
         }
     }
 
@@ -365,6 +511,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      */
     public void onSessionExtended() {
         resetWarnings();
+        // KIDS: the parent granted more time — drop the time-up gate and its overlay
+        KidsTimeUpLock.releaseStateOnly();
+        scheduleForceStop();
     }
 
     private String todayKey() {

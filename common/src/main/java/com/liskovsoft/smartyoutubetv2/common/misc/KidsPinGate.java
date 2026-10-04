@@ -82,6 +82,15 @@ public class KidsPinGate {
     }
 
     /**
+     * KIDS: mark the parent session unlocked after a PIN was verified OUTSIDE
+     * {@link #runWhenUnlocked} (the time-up black screen shows its own dialog so it
+     * can also react to cancel). Same window as a normal unlock.
+     */
+    public static void unlock() {
+        sUnlockedUntilMs = System.currentTimeMillis() + PARENT_SESSION_MS;
+    }
+
+    /**
      * KIDS: forget the session (used when the PIN is (re)armed so an old
      * unlock can't survive a PIN change).
      */
