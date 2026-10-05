@@ -36,6 +36,7 @@ public class KidsModeData {
     private String mHiddenPins;            // KIDS F4: snapshot of parent pins hidden while Kids Mode is on ("id|title" entries)
     private List<String> mHiddenPinsList = new ArrayList<>(); // KIDS F4: parsed view of mHiddenPins
     private boolean mForceStopOnExpire;  // KIDS: stop the clip the moment the daily limit expires + stay on a PIN-locked black screen
+    private boolean mKioskReleased;        // KIDS: parent left the app with the PIN — stays unlocked until it's opened again
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -282,6 +283,28 @@ public class KidsModeData {
         persistData();
     }
 
+    /**
+     * KIDS: true while a PIN-approved parent exit is in effect.
+     *
+     * Persisted on purpose: the exit kills the process (Runtime.exit), so an
+     * in-memory window is gone before the system rebinds the kiosk key guard —
+     * which used to drag the app right back on screen after a PIN exit.
+     * Cleared again on the next real resume (KioskModeManager.applyOnResume),
+     * so opening the app re-locks it immediately.
+     */
+    public boolean isKioskReleased() {
+        return mKioskReleased;
+    }
+
+    public void setKioskReleased(boolean released) {
+        if (mKioskReleased == released) {
+            return;
+        }
+
+        mKioskReleased = released;
+        persistData();
+    }
+
     // --- Hidden parent pins (KIDS F4) ---
 
     /**
@@ -360,6 +383,7 @@ public class KidsModeData {
         mHiddenPins           = Helpers.parseStr(split, 16); // KIDS F4: hidden parent pins snapshot
         mHiddenPinsList       = new ArrayList<>(Helpers.parseStrList(split, 16));
         mForceStopOnExpire    = Helpers.parseBoolean(split, 17, false); // KIDS: force stop default OFF (calm exit stays)
+        mKioskReleased        = Helpers.parseBoolean(split, 18, false); // KIDS: PIN exit release (default locked)
     }
 
     private void persistData() {
@@ -368,6 +392,6 @@ public class KidsModeData {
                         mBlockShorts, mBlockRecommendations, mCalmExit,
                         mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
-                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire));
+                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased));
     }
 }

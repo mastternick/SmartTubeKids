@@ -16,6 +16,7 @@ import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
+import com.liskovsoft.smartyoutubetv2.common.app.views.ViewManager; // KIDS v1.7: exit-in-progress guard
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils; // KIDS v1.2.7: postDelayed / foreground check
 
@@ -51,10 +52,11 @@ import java.lang.ref.WeakReference; // KIDS v1.2.8
  *    releaseForNavigation) and re-applied when the new screen resumes. BACK at a
  *    root screen asks for the PIN — only the correct PIN exits the app
  *    (notifyParentExit opens a grace window so the soft lock doesn't drag the
- *    app back). If the child drops the pin with the system combo (BACK+HOME
- *    hold), the next key press re-pins (ensureLockOnKeyPress); if the app still
- *    loses the screen, KioskWatchdogService climbs back on its own — every
- *    second, with a fullscreen cover on top of the launcher (KIDS v1.4), so
+ *    app back, and — KIDS v1.7 — persists the release so it keeps holding after
+ *    the exit kills the process). If the child drops the pin with the system combo
+ *    (BACK+HOME hold), the next key press re-pins (ensureLockOnKeyPress); if the
+ *    app still loses the screen, KioskWatchdogService climbs back on its own —
+ *    every second, with a fullscreen cover on top of the launcher (KIDS v1.4), so
  *    HOME leaks during the unpin/re-pin cycle are closed automatically.
  *
  * v1.2.7 history: this app runs every activity as launchMode=singleInstance —
@@ -164,16 +166,17 @@ public class KioskModeManager {
      * kiosk is ON and no parent bypass is open. Used by KioskKeyGuardService
      * (system-wide input filter) and by foreground key consumption.
      *
-     * The ONLY bypass is the grace window opened by an approved action
-     * (notifyParentExit on a PIN exit, startKeyGuardSetup while the parent ticks
-     * the guard). KidsPinGate's 10-minute parent session is deliberately NOT a
-     * bypass: it is armed by any PIN entry, so honouring it would re-open HOME
+     * The ONLY bypasses are an approved action's grace window (startKeyGuardSetup
+     * while the parent ticks the guard) and — KIDS v1.7 — a PIN exit that is still
+     * in effect ({@link #isReleasedByParent}, persisted so it survives the process
+     * death the exit causes). KidsPinGate's 10-minute parent session is deliberately
+     * NOT a bypass: it is armed by any PIN entry, so honouring it would re-open HOME
      * for the child for ten minutes after the parent adjusted any Kids setting.
      * The parent inside the app uses BACK+PIN (or the switch) to get out.
      */
     public static boolean isKeyGuardActive(Context context) {
         try {
-            return isKioskEnabled(context) && !isInExitGrace();
+            return isKioskEnabled(context) && !isInExitGrace() && !isReleasedByParent(context);
         } catch (Throwable e) {
             Log.e(TAG, e);
             return false;
@@ -297,10 +300,12 @@ public class KioskModeManager {
         try {
             // Same guards as KioskWatchdogService: never launch into a sleeping
             // screen, never pull the app out of a legitimate PIP window.
-            // isInExitGrace() covers the PIN exit AND the key-guard setup window:
-            // while the parent is ticking the guard in the system Accessibility
-            // screen, onServiceConnected fires and must NOT drag them out of it.
-            if (!isKioskEnabled(context) || isInExitGrace() || Helpers.isAppInForeground()
+            // isInExitGrace() covers the key-guard setup window; isReleasedByParent()
+            // covers the PIN exit and — unlike isInExitGrace — survives the process
+            // death that follows it, so a system rebind of the key guard
+            // (onServiceConnected) can no longer drag the parent straight back.
+            if (!isKioskEnabled(context) || isInExitGrace() || isReleasedByParent(context)
+                    || Helpers.isAppInForeground()
                     || isInPipPlayback(context) || !isScreenInteractive(context)) {
                 return;
             }
@@ -379,6 +384,7 @@ public class KioskModeManager {
             }
 
             sLockRequestedInProcess = false;
+            setReleasedByParent(activity, false); // KIDS v1.7: nothing to bypass once kiosk is off
             stopWatchdog(activity); // KIDS v1.4: switch OFF removes the guardian immediately
         } catch (Throwable e) {
             Log.e(TAG, e);
@@ -399,6 +405,16 @@ public class KioskModeManager {
     public static void applyOnResume(Activity activity) {
         try {
             if (isKioskEnabled(activity)) {
+                // KIDS v1.7: the app is genuinely back on screen — the PIN-approved
+                // exit is over and everything re-arms from here (key guard, screen pin,
+                // watchdog). Skipped during the exit teardown itself: those activities
+                // are finishing, and clearing there would hand the child a still-locked
+                // app the parent has just left.
+                if (!activity.isFinishing() && !activity.isDestroyed()
+                        && !ViewManager.instance(activity).isFinished()) {
+                    setReleasedByParent(activity, false);
+                }
+
                 if (isDeviceOwner(activity)) {
                     applyDeviceOwnerPolicies(activity);
                 }
@@ -425,11 +441,15 @@ public class KioskModeManager {
      * in that case nothing happens (guarded, no crash) and the BACK interception
      * still keeps the app un-exitable from the inside.
      *
-     * KIDS v1.2.8: skipped during the PIN-approved exit window (notifyParentExit).
+     * KIDS v1.2.8: skipped during the PIN-approved exit window (notifyParentExit),
+     * and — KIDS v1.7 — for as long as that exit lasts (see isReleasedByParent):
+     * the one-shot climb-back below and the watchdog must both stay quiet, in this
+     * process and in the fresh one the exit leaves behind.
      */
     public static void scheduleReentry(Activity activity) {
         try {
             if (Build.VERSION.SDK_INT < 21 || System.currentTimeMillis() < sExitGraceUntilMs
+                    || isReleasedByParent(activity)
                     || !isKioskEnabled(activity)
                     || isDeviceOwner(activity) || isTransientTask(activity)) {
                 return;
@@ -447,6 +467,7 @@ public class KioskModeManager {
             Utils.postDelayed(() -> {
                 try {
                     if (System.currentTimeMillis() < sExitGraceUntilMs // KIDS v1.2.8: parent is leaving on purpose
+                            || isReleasedByParent(context) // KIDS v1.7: durable PIN-exit release
                             || !isKioskEnabled(context) // parent turned it off meanwhile
                             || Utils.isAppInForegroundFixed() // normal in-app navigation
                             || isInPipPlayback(context) // PIP window is fine to keep
@@ -502,14 +523,46 @@ public class KioskModeManager {
     }
 
     /**
-     * KIDS v1.2.8: the parent entered the correct PIN and is exiting the app on
-     * purpose — open a grace window (scheduleReentry / auto-lock / key re-pin
-     * stay quiet) and drop our own screen pin.
+     * KIDS v1.2.8 / v1.7: the parent entered the correct PIN and is exiting the app
+     * on purpose. Opens a grace window (scheduleReentry / auto-lock / key re-pin stay
+     * quiet) and drops the lock.
+     *
+     * KIDS v1.7: the grace window is IN-MEMORY, and the exit kills the process a
+     * moment later (Utils.forceFinishTheApp -> Runtime.exit), which wipes it. The
+     * system then rebinds the kiosk key guard in a FRESH process, where
+     * onServiceConnected -> bringAppBack used to pull the app straight back on screen
+     * ("I unlock with the PIN, I exit, and it opens itself again"). The release is
+     * therefore persisted and cleared on the next real app resume.
      */
-    public static void notifyParentExit(Context context) {
-        sExitGraceUntilMs = System.currentTimeMillis() + EXIT_GRACE_MS;
-        releaseForNavigation(context);
-        stopWatchdog(context); // KIDS v1.4: the parent is leaving on purpose — no cover, no drag-back
+    public static void notifyParentExit(Activity activity) {
+        if (activity == null) {
+            return;
+        }
+
+        try {
+            setReleasedByParent(activity, true); // durable: must outlive the process exit below
+
+            // Same-process window: covers the ~2 s teardown before the process dies.
+            sExitGraceUntilMs = System.currentTimeMillis() + EXIT_GRACE_MS;
+
+            // Let go of the system lock: screen pinning AND — with Device Owner — lock
+            // task mode, which otherwise keeps the task confined and snaps us back.
+            if (Build.VERSION.SDK_INT >= 21 && isLockTaskActive(activity)) {
+                activity.stopLockTask();
+                sPinnedActivity = null;
+                sLockRequestedInProcess = false;
+            }
+
+            // Device Owner: the persistent HOME (addPersistentPreferredActivity)
+            // resolves straight back to us, so the parent could never really leave.
+            // Cleared here and re-applied by applyOnResume on the next real open.
+            clearDeviceOwnerPolicies(activity);
+
+            releaseForNavigation(activity);
+            stopWatchdog(activity); // KIDS v1.4: the parent is leaving on purpose — no cover, no drag-back
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
     }
 
     /**
@@ -521,6 +574,7 @@ public class KioskModeManager {
         try {
             if (Build.VERSION.SDK_INT < 21 || !isKioskEnabled(activity)
                     || System.currentTimeMillis() < sExitGraceUntilMs
+                    || isReleasedByParent(activity)
                     || isLockTaskActive(activity)) {
                 return;
             }
@@ -541,9 +595,41 @@ public class KioskModeManager {
     /**
      * KIDS v1.4: true while the parent-approved PIN exit window is open
      * (scheduleReentry / auto-lock / watchdog stay quiet).
+     *
+     * KIDS v1.7: this window is in-memory only — see {@link #isReleasedByParent},
+     * which is what actually holds after the exit kills the process.
      */
     public static boolean isInExitGrace() {
         return System.currentTimeMillis() < sExitGraceUntilMs;
+    }
+
+    /**
+     * KIDS v1.7: TRUE while a PIN-approved parent exit is still in effect.
+     *
+     * Persisted on purpose: the exit kills the process (Utils.forceFinishTheApp ->
+     * Runtime.exit), which wipes every in-memory window, and the system then rebinds
+     * the key guard / restarts the sticky watchdog in a fresh process. Those used to
+     * relaunch the app seconds after a correct PIN ("it exits and opens itself again").
+     *
+     * Cleared in applyOnResume the moment the app is genuinely opened again, so a
+     * re-entry locks it immediately.
+     */
+    public static boolean isReleasedByParent(Context context) {
+        try {
+            return isKioskEnabled(context) && KidsModeData.instance(context).isKioskReleased();
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+            return false; // fail closed: an unreadable state must keep the child locked in
+        }
+    }
+
+    /** KIDS v1.7: set the persisted PIN-exit release (KidsModeData writes it out synchronously). */
+    private static void setReleasedByParent(Context context, boolean released) {
+        try {
+            KidsModeData.instance(context).setKioskReleased(released);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
     }
 
     /**
@@ -616,7 +702,9 @@ public class KioskModeManager {
         }
 
         // KIDS v1.2.8: the parent just approved an exit with the PIN — don't re-pin.
-        if (System.currentTimeMillis() < sExitGraceUntilMs) {
+        // KIDS v1.7: the persisted release covers the same case in a fresh process
+        // (the exit kills it, so the in-memory window above is already gone there).
+        if (System.currentTimeMillis() < sExitGraceUntilMs || isReleasedByParent(activity)) {
             return;
         }
 

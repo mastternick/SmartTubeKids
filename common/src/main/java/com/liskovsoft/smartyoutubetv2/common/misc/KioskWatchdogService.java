@@ -48,7 +48,10 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
  *   Any key press while covered is swallowed — the cover cannot be poked through;
  *   BACK long-press just forces an immediate relaunch attempt.
  * - stops itself when the app is back on screen, kiosk was switched OFF, the
- *   parent used the approved PIN exit, playback runs in PIP, or the screen is off.
+ *   parent used the approved PIN exit (KIDS v1.7: checked against the PERSISTED
+ *   release, so a sticky restart after the exit kills the process — when the
+ *   in-memory grace is gone — does not relaunch the app the parent just left),
+ *   playback runs in PIP, or the screen is off.
  * - SAFETY VALVE: if the app cannot get on screen after ~45 s (a broken install
  *   must not brick the TV), the cover is removed and the service stops; the pin
  *   and the next key press inside the app still re-arm everything.
@@ -112,6 +115,16 @@ public class KioskWatchdogService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // KIDS v1.7: never arm against a PIN-approved parent exit. START_STICKY makes
+        // the system restart this service after the exit kills the process, and in that
+        // fresh process the in-memory grace window is gone — the loop would relaunch
+        // the app the parent just left. tick() checks this too; stopping here avoids
+        // the notification and the first tick altogether.
+        if (!KioskModeManager.isKioskEnabled(this) || KioskModeManager.isReleasedByParent(this)) {
+            stopSafely();
+            return START_NOT_STICKY;
+        }
+
         mStrikes = 0; // freshly armed (internal navigation or key-driven re-arm)
         scheduleNext(FIRST_DELAY_MS);
 
@@ -139,10 +152,12 @@ public class KioskWatchdogService extends Service {
                 return;
             }
 
-            if (KioskModeManager.isInExitGrace()) {
+            if (KioskModeManager.isInExitGrace() || KioskModeManager.isReleasedByParent(this)) {
                 // Parent exited on purpose with the PIN: stay quiet, don't cover,
-                // don't drag the app back. The window is short and the switch-off
-                // (or the next app start) is the parent's job.
+                // don't drag the app back. The in-memory window is short, but the
+                // persisted release (KIDS v1.7) holds until the app is opened again —
+                // including in the fresh process this service is restarted in, which
+                // used to relaunch the app seconds after a correct PIN.
                 hideOverlay();
                 stopSafely();
                 return;

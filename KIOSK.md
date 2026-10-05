@@ -39,10 +39,17 @@ There are two levels of protection:
 > re-pins the new screen on its resume. Device Owner full lock allowlists the whole
 > package and never needs this cycle.
 
-> **Exit with PIN (v1.2.8).** On the app's root screen BACK opens the PIN dialog
-> (KidsPinGate — one PIN entry per parent session). The correct PIN drops the pin
-> and exits the app, with a 15 s grace window so the soft lock doesn't pull the app
-> back. Without a PIN set, BACK stays blocked in both modes.
+> **Exit with PIN (v1.2.8, durable since v1.7).** On the app's root screen BACK
+> opens the PIN dialog (KidsPinGate — one PIN entry per parent session). The
+> correct PIN drops the lock and exits the app, and the app **stays out**: the
+> release is *persisted* (`KidsModeData`, KIDS v1.7). That matters because the
+> exit kills the process, and the system then rebinds the key guard in a fresh
+> process — an in-memory grace window was already gone by then, so
+> `onServiceConnected → bringAppBack` used to pull the app back on screen right
+> after a correct PIN. With Device Owner the persistent HOME + lock-task
+> allowlist are cleared on exit too (re-applied on the next open). Opening the
+> app again clears the release (`applyOnResume`) and locks it immediately.
+> Without a PIN set, BACK stays blocked in both modes.
 
 Enable the Kids **PIN** before enabling kiosk — otherwise the child can open
 Kids Mode settings and turn kiosk off, and there's no PIN exit either.
@@ -144,7 +151,10 @@ possible.
 > **Guardian details (v1.4, `KioskWatchdogService`).** Armed from
 > `MotherActivity.onStop` (`KioskModeManager.scheduleReentry`), idles/stops when
 > the app is on screen again, kiosk is switched off, playback is in PIP, the
-> screen is off, or the parent left with the PIN (15 s grace). It needs the
+> screen is off, or the parent left with the PIN. The PIN-exit check uses the
+> *persisted* release (KIDS v1.7): the exit kills the process, so on the sticky
+> restart that follows, an in-memory grace window would be gone and the loop
+> would relaunch the app the parent just left. It needs the
 > *Draw over other apps* permission, which Android TV grants automatically at
 > install (`SYSTEM_ALERT_WINDOW` is a normal permission on TV); if a device
 > refuses it, the climb-back loop still runs without the visual cover. As a
@@ -153,8 +163,8 @@ possible.
 
 ### Verifying the key guard on the device (if HOME still leaks)
 
-The guard filters keys **only while kiosk mode is ON** and outside the short exit
-grace — with kiosk OFF every key passes through by design. If HOME still reaches
+The guard filters keys **only while kiosk mode is ON** and outside an approved
+exit — with kiosk OFF every key passes through by design. If HOME still reaches
 the launcher, check the three failure modes in order:
 
 1. **Not enabled** — the service must be listed by the system:
@@ -197,8 +207,10 @@ adb logcat -s KioskKeyGuardService
 ## Exiting kiosk
 
 - Leave the app (parent): press BACK on the main screen and enter the PIN. With
-  the key guard on, HOME is dead for the parent too — outside the short exit grace
-  the only ways out are this BACK+PIN path and turning kiosk off.
+  the key guard on, HOME is dead for the parent inside the app too — but after a
+  PIN exit the app **stays out** until it is opened again, so HOME and the
+  launcher work normally while the parent is outside; opening the app re-locks it
+  at once. Inside it, the ways out are this BACK+PIN path and turning kiosk off.
 - Turn the lock off: Settings → Kids Mode → enter PIN → switch **Kiosk mode** off.
   Everything (pin, HOME override, allowlist) is removed immediately. The key guard
   service may stay enabled — it goes inert with kiosk OFF.
@@ -262,9 +274,15 @@ repornirea TV-ului. Dezactivarea se face din
   acoperire. Siguranță anti-blocare: dacă aplicația nu reușește deloc să revină pe
   ecran timp de ~45 s, paznicul eliberează ecranul.)
 - Ieșirea părintelui: BACK pe ecranul principal + PIN. Cu paznicul de taste pornit,
-  HOME este mort și pentru părinte — în afara ferestrei scurte de grație, singurele
-  ieșiri sunt BACK+PIN sau oprirea kiosk-ului. Serviciul de accesibilitate poate
-  rămâne activat: devine inert când kiosk este oprit.
+  HOME este mort și pentru părinte în interiorul aplicației — dar după o ieșire cu
+  PIN aplicația **rămâne afară** până când este deschisă din nou (eliberarea este
+  persistată, KIDS v1.7, pentru că ieșirea închide procesul, iar sistemul
+  re-leagă paznicul într-un proces nou; fereastra de grație doar în memorie era
+  pierdută, iar paznicul readucea aplicația imediat după PIN-ul corect). HOME și
+  launcherul funcționează normal cât timp părintele este afară; la redeschidere
+  aplicația se încuie imediat. În interior, singurele ieșiri sunt BACK+PIN sau
+  oprirea kiosk-ului. Serviciul de accesibilitate poate rămâne activat: devine
+  inert când kiosk este oprit.
 - Activează **PIN-ul** înainte de kiosk — fără PIN nu există ieșire din aplicație
   cu BACK, altfel copilul poate opri și comutatorul din Kids Mode.
 - Anularea device owner (dacă e nevoie): comanda `adb shell dpm remove-active-admin ...`
@@ -272,8 +290,8 @@ repornirea TV-ului. Dezactivarea se face din
 
 ### Verificarea paznicului pe dispozitiv (dacă HOME tot scapă)
 
-Paznicul filtrează taste **doar cât timp kiosk este pornit** (și în afara ferestrei
-scurte de grație) — cu kiosk oprit, toate tastele trec, prin design. Dacă HOME tot
+Paznicul filtrează taste **doar cât timp kiosk este pornit** (și în afara unei
+ieșiri aprobate) — cu kiosk oprit, toate tastele trec, prin design. Dacă HOME tot
 deschide launcherul, verifică în ordine:
 
 1. **Nu e activat:** `adb shell settings get secure enabled_accessibility_services`

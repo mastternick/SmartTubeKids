@@ -36,8 +36,13 @@ import com.liskovsoft.sharedutils.mylogger.Log;
  * ADB alternative is documented in KIOSK.md.
  *
  * Safety: the guard is INERT unless kiosk is actually ON, and it never traps
- * the parent — the PIN exit and the key-guard setup window both open a grace
- * period in which every key passes through (KioskModeManager.isInExitGrace).
+ * the parent — the PIN exit and the key-guard setup window both open a bypass
+ * in which every key passes through. The setup window is the in-memory grace
+ * (KioskModeManager.isInExitGrace); the PIN exit is the PERSISTED release
+ * (KioskModeManager.isReleasedByParent), because the exit kills the process and
+ * this service is then rebound by the system in a fresh one — honouring only
+ * the in-memory window there pulled the app back on screen right after the
+ * parent had unlocked and left.
  * Volume / power / media / DPAD keys are never touched.
  *
  * Everything is wrapped in try/catch(Throwable): this runs for EVERY key press
@@ -63,10 +68,13 @@ public class KioskKeyGuardService extends AccessibilityService {
                 }
             }
 
-            Log.d(TAG, "Kiosk key guard connected");
+            Log.d(TAG, "Kiosk key guard connected (kiosk=%s, released=%s)",
+                    KioskModeManager.isKioskEnabled(this), KioskModeManager.isReleasedByParent(this));
 
-            // Boot / process restart: with kiosk ON the app belongs on screen
-            // (the watchdog may not be armed yet). No-op when kiosk is off.
+            // Boot / process restart: with kiosk ON the app belongs on screen (the
+            // watchdog may not be armed yet). No-op when kiosk is off, and no-op while
+            // a PIN-approved parent exit is in effect — that is what keeps the app
+            // from being pulled back right after the parent unlocked and left.
             KioskModeManager.bringAppBack(this);
         } catch (Throwable e) {
             Log.e(TAG, e);
