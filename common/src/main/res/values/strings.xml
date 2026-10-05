@@ -793,15 +793,20 @@
     <string name="kids_mode_enabled">Kids Mode enabled</string>
     <string name="kids_mode_disabled">Kids Mode disabled</string>
     <string name="kids_kiosk_mode">Kiosk mode (block leaving the app)</string>
-    <string name="kids_kiosk_mode_desc">Kiosk mode: the child cannot leave the app. HOME/RECENTS are blocked by system screen pinning, and a guardian brings the app back on screen (covering the launcher) whenever the lock window opens — BACK, HOME and other apps never take the child out. BACK asks for the PIN and only the correct PIN lets you exit. With the one-time ADB device-owner setup (KIOSK.md) the lock becomes FULL and survives reboots.</string>
+    <string name="kids_kiosk_mode_desc">Kiosk mode: the child cannot leave the app. The kiosk key guard (Accessibility, one-time setup) blocks HOME/RECENTS and the search/mic key device-wide — the assistant\'s own assist keys are decided by the system before any app, so disable the assistant app for a complete mic block (KIOSK.md) — the current screen is pinned where the system allows it, and a guardian brings the app back on screen (covering the launcher) whenever a lock window opens — BACK, HOME and other apps never take the child out. BACK asks for the PIN and only the correct PIN lets you exit. With the one-time ADB device-owner setup (KIOSK.md) the lock becomes FULL and survives reboots.</string>
     <string name="kids_kiosk_enabled_full">Kiosk mode: full lock applies when you close these settings</string>
-    <string name="kids_kiosk_enabled_pinned">Kiosk mode enabled: HOME is blocked and the guardian pulls the app back automatically. Press BACK and enter the PIN to leave the app.</string>
+    <string name="kids_kiosk_enabled_pinned">Kiosk mode enabled: the guardian pulls the app back automatically and HOME/RECENTS/the search key are blocked once the kiosk key guard is on. Press BACK and enter the PIN to leave the app.</string>
     <string name="kids_kiosk_disabled">Kiosk mode disabled</string>
     <string name="kids_kiosk_exit_blocked">Kiosk mode is on: you cannot exit. Set a Kids Mode PIN to enable exit with PIN.</string>
     <string name="kids_kiosk_unsupported">Kiosk mode requires Android 5.0 or newer</string>
     <!-- KIDS v1.4: kiosk soft-lock guardian -->
     <string name="kids_kiosk_watchdog_notification">Kiosk mode: screen guardian active</string>
     <string name="kids_kiosk_returning">SmartTube Kids is staying locked on screen.\nPlease wait, going back to the app…</string>
+    <!-- KIDS v1.6: kiosk key guard (global block of HOME / RECENTS / mic) -->
+    <string name="kids_kiosk_key_guard_label">SmartTube Kids kiosk key guard</string>
+    <string name="kids_kiosk_key_guard_desc">Blocks the HOME, RECENTS and search/mic keys device-wide while kiosk mode is on, so the child cannot open other apps. Assistant keys are decided by the system before any app can filter them — disable the assistant app for a complete mic block (KIOSK.md). Inert while kiosk mode is off.</string>
+    <string name="kids_kiosk_key_guard_needed">For a TOTAL block (HOME, RECENTS, search/mic key, other apps): enable "SmartTube Kids kiosk key guard" in Settings → Accessibility. If the switch is greyed out, open App info → Allow restricted settings first.</string>
+    <string name="kids_kiosk_key_guard_failed">Could not open Accessibility settings. Open Settings → Accessibility manually and enable "SmartTube Kids kiosk key guard".</string>
     <!-- KIDS v1.3: sidebar filtering settings -->
     <string name="kids_visible_sections">Visible sections</string>
     <string name="kids_allow_search">Allow search</string>

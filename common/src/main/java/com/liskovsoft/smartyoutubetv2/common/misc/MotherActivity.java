@@ -148,6 +148,14 @@ public class MotherActivity extends FragmentActivity {
             return true;
         }
 
+        // KIDS v1.6: kiosk — swallow keys that would take the child out of the app.
+        // The accessibility key guard already kills them system-wide; this is the
+        // foreground safety net (and the whole lock on devices where the guard
+        // hasn't been enabled by the parent yet).
+        if (KioskModeManager.consumeEscapeKey(this, event)) {
+            return true;
+        }
+
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             // KIDS: first key press wakes up from the calm-exit black screen (and consumes the key)
             if (KidsScreenHelper.isBlackScreenShown(this)) {

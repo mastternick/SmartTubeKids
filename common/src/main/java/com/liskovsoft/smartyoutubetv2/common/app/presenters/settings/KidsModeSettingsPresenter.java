@@ -285,9 +285,25 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                     mKidsData.setKioskEnabled(option.isSelected());
 
                     if (option.isSelected()) {
-                        MessageHelpers.showMessage(getContext(), KioskModeManager.isDeviceOwner(getContext())
+                        boolean isDeviceOwner = KioskModeManager.isDeviceOwner(getContext());
+
+                        MessageHelpers.showMessage(getContext(), isDeviceOwner
                                 ? R.string.kids_kiosk_enabled_full
                                 : R.string.kids_kiosk_enabled_pinned);
+
+                        // KIDS v1.6: on TV builds where system screen pinning is
+                        // disabled (most Android TV 14 boxes), the accessibility
+                        // key guard is what actually blocks HOME/mic. Send the
+                        // parent to tick it right now — one time, no PC needed.
+                        if (!isDeviceOwner && !KioskModeManager.isKeyGuardEnabled(getContext())) {
+                            MessageHelpers.showMessage(getContext(), R.string.kids_kiosk_key_guard_needed);
+
+                            Context context = getContext();
+
+                            if (context instanceof Activity) {
+                                KioskModeManager.startKeyGuardSetup((Activity) context);
+                            }
+                        }
                     } else {
                         Context context = getContext();
 

@@ -90,6 +90,25 @@
             android:name="com.liskovsoft.smartyoutubetv2.common.misc.KioskWatchdogService"
             android:enabled="true"
             android:exported="false"/>
+        <!-- KIDS v1.6: kiosk key guard. Accessibility input filter that blocks
+             HOME / RECENTS / mic (SEARCH-ASSIST) system-wide while kiosk is ON —
+             the only way to lock a TV without Device Owner (screen pinning is
+             silently disabled on many Android TV 14 builds). Enabled by the
+             parent from Kids Mode settings (KioskModeManager.startKeyGuardSetup)
+             or via ADB (see KIOSK.md). Inert when kiosk is OFF. -->
+        <service
+            android:name="com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService"
+            android:label="@string/kids_kiosk_key_guard_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:enabled="true"
+            android:exported="true">
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kiosk_key_guard" />
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+        </service>
 
         <activity android:name=".misc.BackupReceiverActivity"
             android:exported="true">

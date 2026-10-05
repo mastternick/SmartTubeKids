@@ -9,7 +9,10 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.os.Build;
+import android.provider.Settings; // KIDS v1.6: key guard setup / status
+import android.view.KeyEvent; // KIDS v1.6: foreground key consumption
 
+import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
@@ -21,7 +24,16 @@ import java.lang.ref.WeakReference; // KIDS v1.2.8
 /**
  * KIDS: Kiosk mode — the child cannot leave the app.
  *
- * Two levels of protection, chosen automatically:
+ * Two levels of protection, chosen automatically, plus the key guard:
+ *
+ * 0. KEY GUARD (KIDS v1.6, no Device Owner needed). {@link KioskKeyGuardService},
+ *    an AccessibilityService with flagRequestFilterKeyEvents, swallows HOME,
+ *    RECENTS and the mic/assistant keys system-wide while kiosk is ON. This is
+ *    what closes the soft-lock hole on Android TV 14 builds where system screen
+ *    pinning (level 2) is disabled: without it startLockTask() is a silent no-op
+ *    and only BACK (in-app) stays blocked. Inert unless kiosk is ON; the parent
+ *    can leave it installed permanently. Enabled once from Kids Mode settings
+ *    (startKeyGuardSetup) or via ADB (see KIOSK.md).
  *
  * 1. FULL LOCK (Device Owner). If the app was set as device owner via ADB
  *    (adb shell dpm set-device-owner app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskDeviceAdminReceiver)
@@ -77,6 +89,12 @@ public class KioskModeManager {
     private static final long EXIT_GRACE_MS = 15_000;
     // KIDS v1.2.8: re-pin throttle on key presses (after the system unpin combo).
     private static final long LOCK_ON_KEY_THROTTLE_MS = 3_000;
+    // KIDS v1.6: the parent is sent to the system Accessibility screen (key
+    // guard setup). Needs more than the 15 s exit grace to navigate there.
+    private static final long SETUP_GRACE_MS = 5 * 60_000;
+    // KIDS v1.6: throttle the key-guard climb-back (a held escape key must not
+    // spam activity starts).
+    private static final long BRING_BACK_THROTTLE_MS = 1_000;
 
     private static final int DO_STATE_UNKNOWN = 0;
     private static final int DO_STATE_APPLIED = 1;
@@ -88,6 +106,8 @@ public class KioskModeManager {
     private static long sExitGraceUntilMs; // KIDS v1.2.8: PIN-approved exit window
     private static long sLastLockOnKeyMs; // KIDS v1.2.8: throttle for ensureLockOnKeyPress
     private static WeakReference<Activity> sPinnedActivity; // KIDS v1.2.8: the task we pinned ourselves
+    private static boolean sKeyGuardHintShown; // KIDS v1.6: one key-guard hint per process
+    private static long sLastBringBackMs; // KIDS v1.6: key-guard climb-back throttle
 
     private KioskModeManager() {
     }
@@ -140,6 +160,208 @@ public class KioskModeManager {
     }
 
     /**
+     * KIDS v1.6: TRUE when the global key guard must swallow escape keys —
+     * kiosk is ON and no parent bypass is open. Used by KioskKeyGuardService
+     * (system-wide input filter) and by foreground key consumption.
+     *
+     * The ONLY bypass is the grace window opened by an approved action
+     * (notifyParentExit on a PIN exit, startKeyGuardSetup while the parent ticks
+     * the guard). KidsPinGate's 10-minute parent session is deliberately NOT a
+     * bypass: it is armed by any PIN entry, so honouring it would re-open HOME
+     * for the child for ten minutes after the parent adjusted any Kids setting.
+     * The parent inside the app uses BACK+PIN (or the switch) to get out.
+     */
+    public static boolean isKeyGuardActive(Context context) {
+        try {
+            return isKioskEnabled(context) && !isInExitGrace();
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+            return false;
+        }
+    }
+
+    /**
+     * KIDS v1.6: is the key guard accessibility service enabled by the parent?
+     * Reads the system's enabled-services list (no permission needed to read).
+     */
+    public static boolean isKeyGuardEnabled(Context context) {
+        try {
+            String enabled = Settings.Secure.getString(context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+
+            if (enabled == null) {
+                return false;
+            }
+
+            String expected = new ComponentName(context, KioskKeyGuardService.class).flattenToString();
+
+            for (String entry : enabled.split(":")) {
+                if (entry.equalsIgnoreCase(expected)) {
+                    return true;
+                }
+            }
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+
+        return false;
+    }
+
+    /**
+     * KIDS v1.6: parent flow — open the system Accessibility screen so the key
+     * guard can be ticked. Soft lock only (Device Owner blocks HOME/RECENTS
+     * itself; the guard is optional there for HOME/RECENTS/the search key, and is
+     * the best available layer for assist keys).
+     *
+     * Opens a long grace window first: without it the watchdog would drag the
+     * parent straight back from the settings screen (and the guard would eat
+     * the keys they need). Same mechanics as the PIN exit, just longer.
+     */
+    public static void startKeyGuardSetup(Activity activity) {
+        if (activity == null) {
+            return;
+        }
+
+        try {
+            sExitGraceUntilMs = System.currentTimeMillis() + SETUP_GRACE_MS;
+            sKeyGuardHintShown = true; // the guidance below IS the hint — no duplicate toast on resume
+            releaseForNavigation(activity);
+            stopWatchdog(activity);
+
+            openKeyGuardSettings(activity); // starts the activity via the MotherActivity hook (pin released)
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+            MessageHelpers.showMessage(activity, R.string.kids_kiosk_key_guard_failed);
+        }
+    }
+
+    // KIDS v1.6: hidden/system action — no public constant in the SDK stubs
+    // (verified against android-34), and no reliable public API level either,
+    // hence a literal + a runtime fallback instead of a version gate.
+    private static final String ACTION_ACCESSIBILITY_DETAILS_SETTINGS =
+            "android.settings.ACCESSIBILITY_DETAILS_SETTINGS";
+
+    /**
+     * KIDS v1.6: open the system Accessibility screen. Deep-links to the guard's
+     * own toggle when the build has one (hidden action + EXTRA_COMPONENT_NAME, as
+     * used by the AOSP AccessibilityDetailsSettingsFragment, which itself falls
+     * back to the plain list when the service is not toggleable yet — e.g. blocked
+     * by Android 13+ "restricted settings" for a side-loaded APK, which is why the
+     * guidance message mentions it). Builds without the details activity (or with
+     * a protected one) drop to the plain accessibility list.
+     */
+    private static void openKeyGuardSettings(Activity activity) {
+        try {
+            Intent details = new Intent(ACTION_ACCESSIBILITY_DETAILS_SETTINGS);
+            details.putExtra(Intent.EXTRA_COMPONENT_NAME,
+                    new ComponentName(activity, KioskKeyGuardService.class).flattenToString());
+            details.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity.startActivity(details);
+            return;
+        } catch (Throwable e) {
+            Log.d(TAG, "No accessibility details screen (%s) — opening the list", e.getMessage());
+        }
+
+        Intent list = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        list.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        activity.startActivity(list); // failure here surfaces as kids_kiosk_key_guard_failed
+    }
+
+    /**
+     * KIDS v1.6: foreground safety net — consume the escape keys if they are
+     * ever dispatched to our window (the accessibility guard already kills them
+     * system-wide; this covers devices where the guard is not enabled yet).
+     * SEARCH is deliberately NOT consumed here: inside the app it opens the
+     * in-app search, not another app.
+     */
+    public static boolean consumeEscapeKey(Context context, KeyEvent event) {
+        try {
+            return event != null && isKeyGuardActive(context)
+                    && isEscapeKey(event.getKeyCode(), false);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+            return false;
+        }
+    }
+
+    /**
+     * KIDS v1.6: pull the app back to the front. Called by the key guard whenever
+     * an escape key arrives while another app is on screen (HOME leaked, the app
+     * was killed, the watchdog isn't armed): the key is swallowed AND the child
+     * lands back in SmartTubeKids. Also called on service connect (boot / process
+     * restart). SYSTEM_ALERT_WINDOW — granted on TV — exempts the app from the
+     * background-activity-start restriction. Throttled; no-op while on screen and
+     * during the parent grace windows (PIN exit / key-guard setup).
+     */
+    public static void bringAppBack(Context context) {
+        try {
+            // Same guards as KioskWatchdogService: never launch into a sleeping
+            // screen, never pull the app out of a legitimate PIP window.
+            // isInExitGrace() covers the PIN exit AND the key-guard setup window:
+            // while the parent is ticking the guard in the system Accessibility
+            // screen, onServiceConnected fires and must NOT drag them out of it.
+            if (!isKioskEnabled(context) || isInExitGrace() || Helpers.isAppInForeground()
+                    || isInPipPlayback(context) || !isScreenInteractive(context)) {
+                return;
+            }
+
+            long now = System.currentTimeMillis();
+
+            if (now - sLastBringBackMs < BRING_BACK_THROTTLE_MS) {
+                return;
+            }
+
+            sLastBringBackMs = now;
+
+            Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(launch);
+                Log.d(TAG, "Kiosk key guard: bringing the app back on screen");
+            }
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+    }
+
+    // Escape keys that take the child out of the app or summon another app
+    // (assistant / mic / launcher overlays). Literals on purpose: referencing
+    // KeyEvent.KEYCODE_ASSIST / KEYCODE_VOICE_ASSIST directly trips lint NewApi
+    // against minSdk 17 (the constants land in API 11 / 21).
+    private static final int KEYCODE_ASSIST = 219;       // KeyEvent.KEYCODE_ASSIST
+    private static final int KEYCODE_VOICE_ASSIST = 231; // KeyEvent.KEYCODE_VOICE_ASSIST (mic button)
+    private static final int KEYCODE_EXPLORER = 64;      // KeyEvent.KEYCODE_EXPLORER (browser key)
+
+    /**
+     * KIDS v1.6: single source of truth for the kiosk blocklist, shared by the
+     * global key guard (includeSearch = true — the remote's search/mic button is
+     * the assistant's entry point device-wide) and the in-app safety net
+     * (includeSearch = false — in-app the search key opens the app's own search).
+     * BACK, volume, power, media and DPAD keys are never in this list.
+     *
+     * HOME, RECENTS and SEARCH are handled in interceptKeyBeforeDispatching, i.e.
+     * after the accessibility input filter, so the guard really kills them. ASSIST
+     * and VOICE_ASSIST are handled in interceptKeyBeforeQueueing (before the
+     * filter): the guard still keeps them away from the app, but the assistant
+     * launch is already posted — see KioskKeyGuardService's LIMIT note.
+     */
+    public static boolean isEscapeKey(int keyCode, boolean includeSearch) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_HOME:
+            case KeyEvent.KEYCODE_APP_SWITCH: // RECENTS
+            case KEYCODE_ASSIST:
+            case KEYCODE_VOICE_ASSIST:
+            case KEYCODE_EXPLORER:
+                return true;
+            case KeyEvent.KEYCODE_SEARCH:
+                return includeSearch;
+            default:
+                return false;
+        }
+    }
+
+    /**
      * KIDS: remove the lock and the Device Owner policies. Called when the parent
      * turns the kiosk switch OFF (PIN-protected) or when the stored preference is OFF.
      */
@@ -181,6 +403,7 @@ public class KioskModeManager {
                     applyDeviceOwnerPolicies(activity);
                 }
                 autoLockIfNeeded(activity); // KIDS v1.2.8: also without DO = screen pinning (HOME blocked); cross-task fixed by releaseForNavigation()
+                hintKeyGuardIfNeeded(activity); // KIDS v1.6: point the parent to the full block
             } else if (isLockTaskActive(activity)) {
                 stopKiosk(activity);
             } else {
@@ -371,6 +594,21 @@ public class KioskModeManager {
         }
     }
 
+    /**
+     * KIDS v1.6: soft lock without the key guard is only a partial block on TV
+     * builds where system screen pinning is disabled (startLockTask is then a
+     * silent no-op and HOME/RECENTS leak). Tell the parent once per process how to
+     * get the full lock. No-op with Device Owner or once the guard is enabled.
+     */
+    private static void hintKeyGuardIfNeeded(Activity activity) {
+        if (sKeyGuardHintShown || isDeviceOwner(activity) || isKeyGuardEnabled(activity)) {
+            return;
+        }
+
+        sKeyGuardHintShown = true;
+        MessageHelpers.showMessage(activity, R.string.kids_kiosk_key_guard_needed);
+    }
+
     private static void autoLockIfNeeded(Activity activity) {
         if (Build.VERSION.SDK_INT < 21) {
             MessageHelpers.showMessage(activity, R.string.kids_kiosk_unsupported);
@@ -414,6 +652,23 @@ public class KioskModeManager {
                 sPinnedActivity = new WeakReference<>(activity); // KIDS v1.2.8: remember the task we pinned
                 sLockRequestedInProcess = true;
                 Log.d(TAG, "Lock task requested from %s", activity.getClass().getSimpleName());
+
+                // KIDS v1.6: on a lot of Android TV 14 builds screen pinning is
+                // disabled at system level, so startLockTask() is a silent no-op.
+                // Detect it and say so once — the key guard and the watchdog are
+                // the layers that actually hold there. (API 23+ only: below that
+                // there is no public lock task state to query.)
+                if (Build.VERSION.SDK_INT >= 23) {
+                    activity.getWindow().getDecorView().postDelayed(() -> {
+                        try {
+                            if (!isLockTaskActive(activity)) {
+                                Log.d(TAG, "Screen pinning not engaged (disabled on this device) — key guard / watchdog carry the lock");
+                            }
+                        } catch (Throwable e) {
+                            Log.e(TAG, e);
+                        }
+                    }, 1_500);
+                }
             } catch (Throwable e) {
                 Log.e(TAG, e);
             }

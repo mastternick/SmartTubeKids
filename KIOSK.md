@@ -1,12 +1,17 @@
 # Kiosk mode (SmartTubeKids)
 
-Kiosk mode blocks the child from leaving the app: HOME / RECENTS keys stop working
-(system screen pinning — v1.2.8 — even without ADB), the BACK key only exits after
-the correct PIN, and with the Device Owner setup the app can be relaunched
-automatically after a TV reboot. Since v1.4 a **screen guardian** (foreground
+Kiosk mode blocks the child from leaving the app. Since **v1.6 the real lock on TV
+boxes is the kiosk key guard** (`KioskKeyGuardService`, an Accessibility input
+filter enabled once by the parent): HOME, RECENTS and the microphone/assistant
+keys are swallowed system-wide, so neither the launcher, nor the assistant, nor
+any app summoned from them can be opened. System screen pinning (v1.2.8) stays as
+a second layer where the device supports it — most Android TV 14 boxes keep screen
+pinning disabled, which is exactly why the guard exists (without it the soft lock
+degrades to "only BACK is blocked"). Since v1.4 a **screen guardian** (foreground
 service) additionally covers the launcher and pulls SmartTubeKids back on screen
-every second whenever the app ever loses it — so HOME, RECENTS and the unpin combo
-cannot put the child into another app. The lock is turned off from
+every second whenever the app ever loses it. The BACK key only exits after the
+correct PIN, and with the Device Owner setup the app can be relaunched
+automatically after a TV reboot. The lock is turned off from
 **Settings → Kids Mode → (PIN) → "Kiosk mode (block leaving the app)"**.
 
 There are two levels of protection:
@@ -15,7 +20,8 @@ There are two levels of protection:
 |---|---|---|
 | Requires | One-time ADB command (Device Owner) | Nothing |
 | Confirmation prompts | None, silent lock | None |
-| HOME / RECENTS | Blocked | Blocked on the current screen (system screen pinning); if any window ever opens (unpin cycle, BACK+HOME combo), the v1.4 guardian covers the launcher and brings the app back ~1 s later |
+| HOME / RECENTS / search key | Blocked by Lock Task; the key guard kills them too (enable it in **either** mode) | Blocked **only when the kiosk key guard is enabled** (Option B step 1); until then the current screen is pinned where the system allows it and the v1.4 guardian covers any window that opens (unpin cycle, BACK+HOME combo) — the launcher is covered and the app returns ~1 s later |
+| Assistant mic button (`ASSIST` keys) | Lock Task refuses the assistant's activity start | Needs the extra step: the assist keys are decided before any input filter, so disable the assistant app over ADB (Option B step 1 note). Guard + guardian keep HOME dead and pull the app back meanwhile |
 | BACK key | PIN-protected exit: asks for the PIN, correct PIN exits the app | PIN-protected exit: asks for the PIN, correct PIN exits the app (without a PIN set: never exits) |
 | Other apps reachable? | No | Only under the guardian cover for ~1–2 s, with no key input reaching them |
 | Playback / Settings inside the app | Fully working | Fully working (v1.2.8 auto-unpins before each navigation) |
@@ -80,18 +86,60 @@ Notes / troubleshooting:
 
 ## Option B — Soft lock (no ADB)
 
-Just enable **Kiosk mode** in Kids Mode settings. The current screen is pinned by
-the system, so HOME / RECENTS do nothing, while clips, Settings and dialogs keep
-working: the pin is released moments before every internal navigation and
-re-applied on the new screen. BACK asks for the PIN — only the correct PIN exits
-the app. If the child uses the system unpin combo (BACK+HOME hold) or the pin
-window ever opens, the **v1.4 screen guardian** takes over: a foreground service
-relaunches the app every second and, while it isn't on top yet, a fullscreen
-cover hides and swallows input on whatever is behind (the launcher, another app).
-The child never operates another app — only the cover is briefly visible.
-Still weaker than Option A (a ~1–2 s visual window exists while the guardian
-climbs back), but no escape is sustained. Set the Kids **PIN** too, otherwise
-BACK has no exit path at all. Use Option A whenever possible.
+1. **Enable the key guard — this is the part that blocks HOME / RECENTS and the
+   search/mic key device-wide.** (AOSP handles those three in
+   `interceptKeyBeforeDispatching`, i.e. *after* the accessibility input filter,
+   so consuming them here really kills them.) Turn on **Kiosk mode** in Kids Mode
+   settings: right after the switch the app shows the explanation and opens the
+   system **Accessibility** screen. Tick **"SmartTube Kids kiosk key guard"**
+   there (on Android 13+ side-loaded apps may need App info → ⋮ → *Allow
+   restricted settings* first), then press BACK — the app returns by itself (a
+   5-minute grace window keeps the guardian quiet during setup). The guard is
+   inert whenever kiosk is OFF, so it can stay enabled forever. ADB alternative:
+   ```bash
+   adb shell settings put secure enabled_accessibility_services app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService
+   adb shell settings put secure accessibility_enabled 1
+   ```
+   (other flavors: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`. The
+   value replaces the whole enabled-services list, so do this only on a TV that
+   doesn't already use another accessibility service.)
+
+   > **The assistant button itself is a separate case (platform limit).**
+   > `KEYCODE_ASSIST` / `KEYCODE_VOICE_ASSIST` are handled in
+   > `PhoneWindowManager.interceptKeyBeforeQueueing`, which runs *before* any
+   > input filter — the launch is already posted when the guard sees the event, so
+   > no app-side/Accessibility trick can stop it. Remotes whose mic button sends
+   > `KEYCODE_SEARCH` (very common on Android TV) are fully covered by the guard.
+   > To kill the assistant completely, disable the assistant app once over ADB
+   > (no Device Owner needed — find it with `adb shell pm list packages | grep -i assist`,
+   > it is usually `com.google.android.katniss` on ATV):
+   > ```bash
+   > adb shell pm disable-user --user 0 com.google.android.katniss
+   > ```
+   > (re-enable with `pm enable`). With Device Owner (Option A) Lock Task refuses
+   > the assistant's activity start, which closes the same hole without ADB.
+   > Either way the v1.4 guardian already limits a pop-up to ~1 s and HOME stays
+   > dead, so the child cannot stay in another app.
+2. The rest is automatic: the current screen is pinned by the system where it
+   supports pinning, clips / Settings / dialogs keep working (the pin is released
+   moments before every internal navigation and re-applied on the new screen),
+   and BACK asks for the PIN — only the correct PIN exits the app. If any window
+   still opens, the **v1.4 screen guardian** takes over: a foreground service
+   relaunches the app every second and, while it isn't on top yet, a fullscreen
+   cover hides and swallows input on whatever is behind (the launcher, another
+   app).
+
+Option A still wins on robustness: device-owner Lock Task needs no accessibility
+permission, blocks notifications too, survives reboots and refuses the assistant
+start. But with the key guard on there is no sustained escape in either mode:
+HOME, RECENTS and the search key are dead device-wide while kiosk is on. Set the
+Kids **PIN** too, otherwise BACK has no exit path at all. Use Option A whenever
+possible.
+
+> Note: while the guard is on, a remote whose search/mic button sends
+> `KEYCODE_SEARCH` no longer opens search — that is the point, it is the
+> assistant's entry point. Whitelisted search stays reachable from the app's own
+> top panel when **Allow search** is enabled in Kids Mode.
 
 > **Guardian details (v1.4, `KioskWatchdogService`).** Armed from
 > `MotherActivity.onStop` (`KioskModeManager.scheduleReentry`), idles/stops when
@@ -103,44 +151,154 @@ BACK has no exit path at all. Use Option A whenever possible.
 > broken-install safety valve it stops covering after ~45 s of failed relaunches,
 > so a TV can never be left unusable by the guardian itself.
 
+### Verifying the key guard on the device (if HOME still leaks)
+
+The guard filters keys **only while kiosk mode is ON** and outside the short exit
+grace — with kiosk OFF every key passes through by design. If HOME still reaches
+the launcher, check the three failure modes in order:
+
+1. **Not enabled** — the service must be listed by the system:
+   ```bash
+   adb shell settings get secure enabled_accessibility_services
+   # must contain app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService
+   ```
+   Missing → enable it from Settings → Accessibility (or the ADB command above).
+2. **Enabled but not bound** — the system must have it connected with the key filter:
+   ```bash
+   adb shell dumpsys accessibility | grep -A5 KioskKeyGuardService
+   ```
+3. **Bound but the ROM ignores the filter** — watch the guard on a HOME press:
+   ```bash
+   adb logcat -s KioskKeyGuardService
+   ```
+   If it logs `Kiosk key guard: swallowed key 3` while the launcher still opens, the
+   vendor build bypasses accessibility key filtering → fall back to the Device Owner
+   setup (Option A), which blocks HOME/RECENTS in the window manager itself.
+
+Related: `adb logcat | grep "Screen pinning not engaged"` proves the screen-pinning
+no-op on Android TV 14 boxes (the root cause the guard was added for).
+
+**The mic/assistant button only.** Which key does your remote send? Hold the mic
+button and watch the log:
+```bash
+adb logcat -s KioskKeyGuardService
+```
+- `swallowed key 84` → your remote sends `KEYCODE_SEARCH`: the guard covers it, done.
+- Nothing in the log and the assistant still opens → the remote sends
+  `KEYCODE_ASSIST` (219) / `KEYCODE_VOICE_ASSIST` (231). Those are handled in
+  `PhoneWindowManager.interceptKeyBeforeQueueing`, *before* any input filter, so no
+  app can stop them — disable the assistant app instead:
+  ```bash
+  adb shell pm list packages | grep -i assist     # e.g. com.google.android.katniss
+  adb shell pm disable-user --user 0 <assistant pkg>
+  ```
+  (or use the Device Owner setup, whose Lock Task refuses the assistant's start).
+
 ## Exiting kiosk
 
-- Leave the app (parent): press BACK on the main screen and enter the PIN.
+- Leave the app (parent): press BACK on the main screen and enter the PIN. With
+  the key guard on, HOME is dead for the parent too — outside the short exit grace
+  the only ways out are this BACK+PIN path and turning kiosk off.
 - Turn the lock off: Settings → Kids Mode → enter PIN → switch **Kiosk mode** off.
-  Everything (pin, HOME override, allowlist) is removed immediately.
+  Everything (pin, HOME override, allowlist) is removed immediately. The key guard
+  service may stay enabled — it goes inert with kiosk OFF.
 
 ---
 
 # Mod kiosk (română)
 
-Modul kiosk blochează ieșirea copilului din aplicație: tastele HOME / RECENTS nu mai
-funcționează (screen pinning de la sistem — v1.2.8 — chiar și fără ADB), tasta BACK
-iese din aplicație doar după PIN-ul corect, iar cu Device Owner aplicația poate
-porni direct după repornirea TV-ului. Dezactivarea se face din
+Modul kiosk blochează ieșirea copilului din aplicație. Din **v1.6 blocarea reală pe
+TV o face paznicul de taste** (`KioskKeyGuardService`, un filtru de taste
+Accessibility activat o singură dată de părinte): HOME, RECENTS și tasta de
+căutare/microfon sunt înghițite la nivel de sistem, deci nu se pot deschide
+launcherul sau alte aplicații. Tastele proprii ale asistentului (`ASSIST`) sunt
+decise de sistem înainte de orice filtru de taste — pentru microfonul complet,
+dezactivează aplicația de asistent (vezi mai jos). Screen pinning-ul
+de sistem (v1.2.8) rămâne ca al doilea strat acolo unde dispozitivul îl suportă —
+majoritatea cutiilor Android TV 14 îl țin dezactivat, exact de asta există
+paznicul (fără el soft lock-ul se degradează la „doar BACK e blocat"). Din v1.4 un
+**paznic de ecran** (serviciu foreground) acoperă launcherul și readuce aplicația
+pe ecran în fiecare secundă ori de câte ori o pierde. Tasta BACK iese din aplicație
+doar după PIN-ul corect, iar cu Device Owner aplicația poate porni direct după
+repornirea TV-ului. Dezactivarea se face din
 **Setări → Kids Mode → (PIN) → „Kiosk mode"**.
 
-- **Recomandat (blocare totală):** conectează TV-ul prin ADB din rețea și rulează,
-  imediat după instalare și **înainte** de a deschide aplicația:
+- **Blocarea reală fără ADB (paznicul de taste, v1.6):** activează **Kiosk mode** în
+  Kids Mode → aplicația deschide automat **Setări → Accesibilitate** → bifează
+  **„Paznic de taste kiosk SmartTube Kids"** (pe Android 13+ aplicațiile instalate
+  manual pot cere întâi App info → ⋮ → *Allow restricted settings*). Apoi apasă
+  BACK — aplicația revine singură (fereastra de grație de 5 minute ține paznicul
+  liniștit în timpul configurării). Paznicul nu face nimic când kiosk e oprit, deci
+  poate rămâne activat permanent. Alternativă ADB:
+  ```bash
+  adb shell settings put secure enabled_accessibility_services app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService
+  adb shell settings put secure accessibility_enabled 1
+  ```
+  (alte variante: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`; comanda
+  înlocuiește întreaga listă de servicii active, folosește-o doar pe un TV care nu
+  are deja alt serviciu de accesibilitate pornit.)
+- **Recomandat (blocare totală, cu ADB):** conectează TV-ul prin ADB din rețea și
+  rulează, imediat după instalare și **înainte** de a deschide aplicația:
   ```bash
   adb shell dpm set-device-owner app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskDeviceAdminReceiver
   ```
   Apoi activează PIN-ul și Kiosk mode în setările Kids. Fără mesaje de confirmare,
-  copilul nu poate ieși; BACK cere PIN-ul pentru ieșire.
-- **Fără ADB (soft lock):** ecranul curent este fixat de sistem (screen pinning) —
-  HOME/RECENTS sunt blocate, iar clipurile, Setările și dialogurile funcționează
-  pentru că fixarea se eliberează chiar înainte de fiecare navigare internă și se
-  reaplică automat pe ecranul nou. BACK cere PIN-ul; doar PIN-ul corect scoate
-  aplicația. Iar din v1.4, dacă aplicația pierde ecranul oricum (combo-ul
-  BACK+HOME ținut sau fereastra de deblocare), **paznicul de ecran**
-  (`KioskWatchdogService`, serviciu foreground) o repornește în fiecare secundă
-  și acoperă launcherul cu un ecran „întorcem în aplicație…" care absoarbe toate
-  apăsările de taste — copilul nu poate folosi nicio altă aplicație, doar vede
-  acoperirea ~1–2 secunde până revine SmartTubeKids. Fără PIN setat, BACK rămâne
-  complet blocat. (Permisunea „suprapunere peste alte aplicații" este acordată
-  automat de Android TV la instalare; dacă un dispozitiv o refuză, repornirea
-  automată continuă fără acoperire. Siguranță anti-blocare: dacă aplicația nu
-  reușește deloc să revină pe ecran timp de ~45 s, paznicul eliberează ecranul.)
+  copilul nu poate ieși; BACK cere PIN-ul pentru ieșire. (Paznicul de taste poate fi
+  activat și aici — pentru tasta de căutare/mic; tastele `ASSIST` ale asistentului
+  se închid prin Lock Task sau prin dezactivarea aplicației de asistent.)
+- **Fără paznic (doar pinning + paznicul de ecran):** ecranul curent este fixat de
+  sistem (screen pinning) — HOME/RECENTS sunt blocate **doar dacă** dispozitivul
+  suportă pinning, iar clipurile, Setările și dialogurile funcționează pentru că
+  fixarea se eliberează chiar înainte de fiecare navigare internă și se reaplică
+  automat pe ecranul nou. BACK cere PIN-ul; doar PIN-ul corect scoate aplicația.
+  Iar din v1.4, dacă aplicația pierde ecranul oricum (combo-ul BACK+HOME ținut sau
+  fereastra de deblocare), **paznicul de ecran** (`KioskWatchdogService`, serviciu
+  foreground) o repornește în fiecare secundă și acoperă launcherul cu un ecran
+  „întorcem în aplicație…" care absoarbe toate apăsările de taste — copilul nu
+  poate folosi nicio altă aplicație, doar vede acoperirea ~1–2 secunde până revine
+  SmartTubeKids. Fără PIN setat, BACK rămâne complet blocat. (Permisiunea
+  „suprapunere peste alte aplicații" este acordată automat de Android TV la
+  instalare; dacă un dispozitiv o refuză, repornirea automată continuă fără
+  acoperire. Siguranță anti-blocare: dacă aplicația nu reușește deloc să revină pe
+  ecran timp de ~45 s, paznicul eliberează ecranul.)
+- Ieșirea părintelui: BACK pe ecranul principal + PIN. Cu paznicul de taste pornit,
+  HOME este mort și pentru părinte — în afara ferestrei scurte de grație, singurele
+  ieșiri sunt BACK+PIN sau oprirea kiosk-ului. Serviciul de accesibilitate poate
+  rămâne activat: devine inert când kiosk este oprit.
 - Activează **PIN-ul** înainte de kiosk — fără PIN nu există ieșire din aplicație
   cu BACK, altfel copilul poate opri și comutatorul din Kids Mode.
 - Anularea device owner (dacă e nevoie): comanda `adb shell dpm remove-active-admin ...`
   de mai sus, sau oprește comutatorul din aplicație.
+
+### Verificarea paznicului pe dispozitiv (dacă HOME tot scapă)
+
+Paznicul filtrează taste **doar cât timp kiosk este pornit** (și în afara ferestrei
+scurte de grație) — cu kiosk oprit, toate tastele trec, prin design. Dacă HOME tot
+deschide launcherul, verifică în ordine:
+
+1. **Nu e activat:** `adb shell settings get secure enabled_accessibility_services`
+   trebuie să conțină `app.smarttubekids/...KioskKeyGuardService`.
+2. **Activat dar nelegat de sistem:** `adb shell dumpsys accessibility | grep -A5 KioskKeyGuardService`.
+3. **Legat, dar ROM-ul ignoră filtrul:** `adb logcat -s KioskKeyGuardService` — dacă
+   scrie „swallowed key 3" iar launcherul tot se deschide, build-ul vendor nu aplică
+   filtrarea de taste de accesibilitate → folosește Device Owner (Opțiunea A), care
+   blochează HOME/RECENTS direct în window manager.
+
+Util: `adb logcat | grep "Screen pinning not engaged"` confirmă no-op-ul
+screen pinning-ului pe cutiile Android TV 14 (cauza pentru care există paznicul).
+
+**Doar butonul de microfon/asistent.** Ce tastă trimite telecomanda ta? Ține apăsat
+butonul de mic și urmărește logul:
+```bash
+adb logcat -s KioskKeyGuardService
+```
+- `swallowed key 84` → telecomanda trimite `KEYCODE_SEARCH`: paznicul îl acoperă.
+- Nimic în log și asistentul tot se deschide → trimite `KEYCODE_ASSIST` (219) /
+  `KEYCODE_VOICE_ASSIST` (231). Acestea sunt tratate în
+  `PhoneWindowManager.interceptKeyBeforeQueueing`, *înainte* de orice filtru de
+  taste, deci nicio aplicație nu le poate opri — dezactivează aplicația de asistent:
+  ```bash
+  adb shell pm list packages | grep -i assist     # de obicei com.google.android.katniss
+  adb shell pm disable-user --user 0 <pachet-asistent>
+  ```
+  (sau folosește Device Owner, unde Lock Task refuză pornirea asistentului).
