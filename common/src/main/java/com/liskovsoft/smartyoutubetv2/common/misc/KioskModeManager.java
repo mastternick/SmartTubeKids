@@ -110,6 +110,11 @@ public class KioskModeManager {
     private static WeakReference<Activity> sPinnedActivity; // KIDS v1.2.8: the task we pinned ourselves
     private static boolean sKeyGuardHintShown; // KIDS v1.6: one key-guard hint per process
     private static long sLastBringBackMs; // KIDS v1.6: key-guard climb-back throttle
+    // KIDS v1.7.1: the PIN exit is being carried out in THIS process right now. A resume
+    // here is then part of the teardown, not a reopen, and must not clear the release —
+    // the process dies ~2 s later and the fresh process would otherwise drag the app
+    // back. Reset by onAppOpened() at the unambiguous "app is being opened" points.
+    private static boolean sParentExitInProgress;
 
     private KioskModeManager() {
     }
@@ -384,6 +389,7 @@ public class KioskModeManager {
             }
 
             sLockRequestedInProcess = false;
+            sParentExitInProgress = false; // KIDS v1.7.1: no exit pending either
             setReleasedByParent(activity, false); // KIDS v1.7: nothing to bypass once kiosk is off
             stopWatchdog(activity); // KIDS v1.4: switch OFF removes the guardian immediately
         } catch (Throwable e) {
@@ -412,13 +418,16 @@ public class KioskModeManager {
                 // properlyFinishTheApp also calls PlaybackPresenter.forceFinish(), whose
                 // `getView().finishReally()` can startParentView() a Browse screen while
                 // ViewManager.safeStartActivity resets mIsFinished — isFinished() alone
-                // is not enough. Within the ~2 s teardown the in-memory window is open,
-                // so isInExitGrace() blocks the clear; in the fresh process the exit
-                // leaves behind sExitGraceUntilMs is 0, so a genuine reopen re-arms the
-                // kiosk immediately.
+                // is not enough, so the in-process sParentExitInProgress marker is the
+                // decisive guard: while the exit is being carried out, no resume may
+                // clear the release. It is reset by onAppOpened() when the app is really
+                // opened (a fresh process starts with it false, so a genuine reopen
+                // re-arms the kiosk immediately). isInExitGrace() is deliberately NOT
+                // used here: it also covers the 5-minute key-guard setup window, and
+                // gating on it would leave the kiosk disarmed after a cancelled exit.
                 if (!activity.isFinishing() && !activity.isDestroyed()
                         && !ViewManager.instance(activity).isFinished()
-                        && !isInExitGrace()) {
+                        && !sParentExitInProgress) {
                     setReleasedByParent(activity, false);
                 }
 
@@ -548,6 +557,7 @@ public class KioskModeManager {
 
         try {
             setReleasedByParent(activity, true); // durable: must outlive the process exit below
+            sParentExitInProgress = true; // and no resume in THIS process may clear it
 
             // Same-process window: covers the ~2 s teardown before the process dies.
             sExitGraceUntilMs = System.currentTimeMillis() + EXIT_GRACE_MS;
@@ -570,6 +580,21 @@ public class KioskModeManager {
         } catch (Throwable e) {
             Log.e(TAG, e);
         }
+    }
+
+    /**
+     * KIDS v1.7.1: the app is being opened by the user — a cold start or the existing
+     * task being brought back. Any PIN exit that was still pending is over: dropping the
+     * marker lets the next applyOnResume clear the persisted release, so the kiosk
+     * re-arms immediately instead of staying disarmed for the rest of the session.
+     *
+     * Callers are the two unambiguous "app is being opened" points: SplashPresenter
+     * .onViewInitialized (where a pending app exit is cancelled — if that exit is
+     * cancelled, the release must go with it) and ViewManager.startDefaultView (for
+     * opens that skip the splash, e.g. from history).
+     */
+    public static void onAppOpened() {
+        sParentExitInProgress = false;
     }
 
     /**

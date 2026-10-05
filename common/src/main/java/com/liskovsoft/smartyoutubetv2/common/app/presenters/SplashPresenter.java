@@ -80,6 +80,11 @@ public class SplashPresenter extends BasePresenter<SplashView> {
 
         Utils.cancelFinishTheApp(getContext());
 
+        // KIDS v1.7.1: the app is being opened. If the line above just cancelled a
+        // pending PIN exit, the parent-approved release must go with it, otherwise the
+        // kiosk would stay disarmed for this whole session.
+        com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager.onAppOpened();
+
         runOnceTasks();
         runPerInstanceTasks();
         runPerViewTasks();

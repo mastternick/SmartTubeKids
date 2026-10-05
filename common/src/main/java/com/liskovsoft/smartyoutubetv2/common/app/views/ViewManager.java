@@ -166,6 +166,9 @@ public class ViewManager {
     }
 
     public void startDefaultView() {
+        // KIDS v1.7.1: opening the app ends any pending PIN exit (see onAppOpened).
+        com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager.onAppOpened();
+
         mIsMoveToBackEnabled = false;
         mIsPlayerOnlyModeEnabled = false;
 

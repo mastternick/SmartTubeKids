@@ -47,7 +47,10 @@ public class RemoteControlReceiver extends BroadcastReceiver {
     private static final String ACTION_LOCKED_BOOT_COMPLETED = "android.intent.action.LOCKED_BOOT_COMPLETED";
     private static final String ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON";
     private static final String ACTION_QUICKBOOT_POWERON_HTC = "com.htc.intent.action.QUICKBOOT_POWERON";
-    private static final String ACTION_REBOOT = "android.intent.action.REBOOT";
+    // NOTE: android.intent.action.REBOOT is deliberately NOT in this list. It is the
+    // pre-shutdown broadcast, not a boot signal: acting on it would clear the release and
+    // re-apply Device Owner policies / pull the app up while the system is going down.
+    // The actions above already cover every real restart.
 
     /**
      * KIDS v1.7: TRUE only for a real reboot, never for the other actions this
@@ -60,7 +63,6 @@ public class RemoteControlReceiver extends BroadcastReceiver {
                 || ACTION_BOOT_COMPLETED_ALT.equals(action)
                 || ACTION_LOCKED_BOOT_COMPLETED.equals(action)
                 || ACTION_QUICKBOOT_POWERON.equals(action)
-                || ACTION_QUICKBOOT_POWERON_HTC.equals(action)
-                || ACTION_REBOOT.equals(action);
+                || ACTION_QUICKBOOT_POWERON_HTC.equals(action);
     }
 }
