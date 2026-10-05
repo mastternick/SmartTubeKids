@@ -37,6 +37,7 @@ public class KidsModeData {
     private List<String> mHiddenPinsList = new ArrayList<>(); // KIDS F4: parsed view of mHiddenPins
     private boolean mForceStopOnExpire;  // KIDS: stop the clip the moment the daily limit expires + stay on a PIN-locked black screen
     private boolean mKioskReleased;        // KIDS: parent left the app with the PIN — stays unlocked until it's opened again
+    private boolean mRelockOnBoot;         // KIDS v1.7: should a real TV reboot re-arm kiosk? (default OFF = release survives)
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -305,6 +306,31 @@ public class KidsModeData {
         persistData();
     }
 
+    // --- Relock on boot (KIDS v1.7) ---
+
+    /**
+     * KIDS v1.7: what a TV reboot does to a PIN-approved parent exit.
+     *
+     * OFF (default, owner decision): the release survives a power cycle — the app
+     * stays out until it is opened again, then locks immediately.
+     * ON: a real reboot re-arms kiosk, so the key guard / Device Owner bring the app
+     * back on screen by itself after the TV restarts (see
+     * {@code KioskModeManager.onDeviceBooted}). Standby/wake is NOT a reboot and never
+     * re-arms in either case.
+     */
+    public boolean isRelockOnBoot() {
+        return mRelockOnBoot;
+    }
+
+    public void setRelockOnBoot(boolean relock) {
+        if (mRelockOnBoot == relock) {
+            return;
+        }
+
+        mRelockOnBoot = relock;
+        persistData();
+    }
+
     // --- Hidden parent pins (KIDS F4) ---
 
     /**
@@ -384,6 +410,7 @@ public class KidsModeData {
         mHiddenPinsList       = new ArrayList<>(Helpers.parseStrList(split, 16));
         mForceStopOnExpire    = Helpers.parseBoolean(split, 17, false); // KIDS: force stop default OFF (calm exit stays)
         mKioskReleased        = Helpers.parseBoolean(split, 18, false); // KIDS: PIN exit release (default locked)
+        mRelockOnBoot         = Helpers.parseBoolean(split, 19, false); // KIDS v1.7: reboot re-arms kiosk? (default: no)
     }
 
     private void persistData() {
@@ -392,6 +419,6 @@ public class KidsModeData {
                         mBlockShorts, mBlockRecommendations, mCalmExit,
                         mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
-                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased));
+                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot));
     }
 }

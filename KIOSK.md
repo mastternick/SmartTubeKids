@@ -49,6 +49,10 @@ There are two levels of protection:
 > after a correct PIN. With Device Owner the persistent HOME + lock-task
 > allowlist are cleared on exit too (re-applied on the next open). Opening the
 > app again clears the release (`applyOnResume`) and locks it immediately.
+> A TV **reboot** does not clear the release by default — the app stays out until it
+> is opened again; enable **Re-lock kiosk after a reboot** in Kids Mode if a reboot
+> should re-arm the lock instead (the guardian / Device Owner then bring the app back
+> on screen by itself). Waking from standby is not a reboot and never re-arms.
 > Without a PIN set, BACK stays blocked in both modes.
 
 Enable the Kids **PIN** before enabling kiosk — otherwise the child can open
@@ -282,7 +286,10 @@ repornirea TV-ului. Dezactivarea se face din
   launcherul funcționează normal cât timp părintele este afară; la redeschidere
   aplicația se încuie imediat. În interior, singurele ieșiri sunt BACK+PIN sau
   oprirea kiosk-ului. Serviciul de accesibilitate poate rămâne activat: devine
-  inert când kiosk este oprit.
+  inert când kiosk este oprit. După o ieșire cu PIN, aplicația rămâne afară și peste
+  o repornire a TV-ului; opțiunea „Re-încuie kiosk după repornire" din Kids Mode face
+  ca un reboot real să re-încuie automat (paznicul / Device Owner readuc aplicația pe
+  ecran). Trecerea în standby nu este o repornire și nu re-încuie niciodată.
 - Activează **PIN-ul** înainte de kiosk — fără PIN nu există ieșire din aplicație
   cu BACK, altfel copilul poate opri și comutatorul din Kids Mode.
 - Anularea device owner (dacă e nevoie): comanda `adb shell dpm remove-active-admin ...`

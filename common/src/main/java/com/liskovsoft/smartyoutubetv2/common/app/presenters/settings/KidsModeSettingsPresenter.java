@@ -143,6 +143,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendAllowSearchSwitch(settingsPresenter);       // AC4: search top button
         appendSelectPlaylistsButton(settingsPresenter);   // kids playlists picker
         appendKioskSwitch(settingsPresenter); // KIDS: block leaving the app
+        appendRelockOnBootSwitch(settingsPresenter); // KIDS v1.7: what a reboot does to a PIN exit
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
@@ -315,6 +316,26 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                     }
                 },
                 mKidsData.isKioskEnabled()));
+    }
+
+    /**
+     * KIDS v1.7: what a TV reboot does to a PIN-approved parent exit.
+     *
+     * OFF (default, per owner decision): after leaving with the PIN the app stays out
+     * even across a reboot, and locks again only when SmartTube Kids is opened.
+     * ON: a real reboot re-arms kiosk, so the guardian / key guard bring the app back
+     * on screen by itself after the TV restarts (matters most with Device Owner, where
+     * the app is the persistent HOME). Standby/wake is not a reboot either way.
+     *
+     * Only kiosk mode makes this visible, but the switch is always shown so it can be
+     * set up before turning kiosk on.
+     */
+    private void appendRelockOnBootSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_kiosk_relock_on_boot),
+                getContext().getString(R.string.kids_kiosk_relock_on_boot_desc),
+                option -> mKidsData.setRelockOnBoot(option.isSelected()),
+                mKidsData.isRelockOnBoot()));
     }
 
     private void appendBlockShortsSwitch(AppDialogPresenter settingsPresenter) {

@@ -669,6 +669,8 @@
   <string name="kids_enter_pin">Introdu PIN-ul Kids Mode</string>
   <string name="kids_kiosk_exit_blocked">Mod kiosk activat: nu poți ieși din aplicație. Setează un PIN în Kids Mode pentru ieșire cu PIN.</string>
   <string name="kids_kiosk_enabled_pinned">Mod kiosk activat: paznicul aduce aplicația înapoi automat, iar HOME, RECENTS și tasta de căutare sunt blocate când paznicul de taste este activ. Apasă BACK și introdu PIN-ul pentru a ieși.</string>
+  <string name="kids_kiosk_relock_on_boot">Re-încuie kiosk după repornire</string>
+  <string name="kids_kiosk_relock_on_boot_desc">OPRIT (implicit): după ieșirea cu PIN aplicația rămâne afară chiar și peste o repornire a TV-ului și se încuie abia când deschizi SmartTube Kids. PORNIT: o repornire reală re-încuie kiosk-ul, deci aplicația revine singură pe ecran după restart. Trecerea în standby nu este o repornire și nu re-încuie în niciun caz.</string>
   <!-- KIDS v1.4: paznicul modului kiosk (soft lock) -->
   <string name="kids_kiosk_watchdog_notification">Mod kiosk: paznicul de ecran este activ</string>
   <string name="kids_kiosk_returning">SmartTube Kids rămâne blocat pe ecran.\nTe rugăm să aștepți, revinem în aplicație…</string>

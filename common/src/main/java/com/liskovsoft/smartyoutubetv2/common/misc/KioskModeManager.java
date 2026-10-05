@@ -640,6 +640,47 @@ public class KioskModeManager {
     }
 
     /**
+     * KIDS v1.7: a real TV reboot. By default the parent's PIN-approved exit survives
+     * the power cycle — the app stays out until it is opened again and locks then. The
+     * Kids Mode option "Re-lock kiosk after a reboot" makes a reboot re-arm the lock
+     * instead, so the app is back on screen by itself after the TV restarts.
+     *
+     * ONLY genuine boot broadcasts may call this: clearing on SCREEN_ON / TIME_SET /
+     * POWER_CONNECTED would recreate the reported bug within seconds of the parent
+     * leaving, because standby is not a reboot (see RemoteControlReceiver).
+     *
+     * Clearing the release is NOT enough on its own — both lock layers only run from
+     * places that assume the app is already on screen:
+     * - Device Owner: notifyParentExit cleared the persistent HOME and the lock task
+     *   allowlist, and applyDeviceOwnerPolicies is otherwise reached only from an
+     *   activity resume, so boot would land on the real launcher and stay there.
+     * - Key guard: system_server binds the AccessibilityService during boot, so its
+     *   onServiceConnected -> bringAppBack has already run (and no-opped on
+     *   released=true) before this receiver is delivered; afterwards the guard only
+     *   reacts to the next escape key.
+     * So re-apply the DO policies and pull the app up here. bringAppBack re-checks
+     * kiosk-on / foreground / PIP / screen-interactive itself, which is why a boot with
+     * the screen off simply does not launch into it — the re-applied HOME (DO) or the
+     * next escape key (soft lock) still closes the loop.
+     */
+    public static void onDeviceBooted(Context context) {
+        try {
+            if (!isKioskEnabled(context) || !KidsModeData.instance(context).isRelockOnBoot()) {
+                return;
+            }
+
+            setReleasedByParent(context, false);
+
+            applyDeviceOwnerPolicies(context); // persistent HOME + allowlist (no-op unless DO)
+            bringAppBack(context);             // re-checks kiosk/foreground/PIP/screen state
+
+            Log.d(TAG, "Kiosk re-armed after boot (relock-on-boot is ON)");
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+    }
+
+    /**
      * KIDS v1.4: soft-lock guardian. Started from scheduleReentry (MotherActivity.onStop)
      * whenever kiosk is ON without Device Owner; stopped whenever the app is back on
      * screen, kiosk goes off, or the parent exits with the PIN. Guarded both ways:

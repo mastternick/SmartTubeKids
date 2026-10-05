@@ -797,6 +797,8 @@
     <string name="kids_kiosk_enabled_full">Kiosk mode: full lock applies when you close these settings</string>
     <string name="kids_kiosk_enabled_pinned">Kiosk mode enabled: the guardian pulls the app back automatically and HOME/RECENTS/the search key are blocked once the kiosk key guard is on. Press BACK and enter the PIN to leave the app.</string>
     <string name="kids_kiosk_disabled">Kiosk mode disabled</string>
+    <string name="kids_kiosk_relock_on_boot">Re-lock kiosk after a reboot</string>
+    <string name="kids_kiosk_relock_on_boot_desc">OFF (default): after you exit with the PIN the app stays out even across a TV reboot, and locks again only when SmartTube Kids is opened. ON: a real reboot re-arms kiosk, so the app is brought back on screen by itself after the TV restarts. Waking from standby is not a reboot and never re-arms in either case.</string>
     <string name="kids_kiosk_exit_blocked">Kiosk mode is on: you cannot exit. Set a Kids Mode PIN to enable exit with PIN.</string>
     <string name="kids_kiosk_unsupported">Kiosk mode requires Android 5.0 or newer</string>
     <!-- KIDS v1.4: kiosk soft-lock guardian -->
