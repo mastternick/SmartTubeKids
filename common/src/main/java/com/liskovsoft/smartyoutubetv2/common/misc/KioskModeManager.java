@@ -407,11 +407,18 @@ public class KioskModeManager {
             if (isKioskEnabled(activity)) {
                 // KIDS v1.7: the app is genuinely back on screen — the PIN-approved
                 // exit is over and everything re-arms from here (key guard, screen pin,
-                // watchdog). Skipped during the exit teardown itself: those activities
-                // are finishing, and clearing there would hand the child a still-locked
-                // app the parent has just left.
+                // watchdog). Three guards keep the exit teardown from clearing its own
+                // release: the activities are finishing then, and — since
+                // properlyFinishTheApp also calls PlaybackPresenter.forceFinish(), whose
+                // `getView().finishReally()` can startParentView() a Browse screen while
+                // ViewManager.safeStartActivity resets mIsFinished — isFinished() alone
+                // is not enough. Within the ~2 s teardown the in-memory window is open,
+                // so isInExitGrace() blocks the clear; in the fresh process the exit
+                // leaves behind sExitGraceUntilMs is 0, so a genuine reopen re-arms the
+                // kiosk immediately.
                 if (!activity.isFinishing() && !activity.isDestroyed()
-                        && !ViewManager.instance(activity).isFinished()) {
+                        && !ViewManager.instance(activity).isFinished()
+                        && !isInExitGrace()) {
                     setReleasedByParent(activity, false);
                 }
 
