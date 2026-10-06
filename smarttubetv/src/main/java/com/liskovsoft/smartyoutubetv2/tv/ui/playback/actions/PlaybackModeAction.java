@@ -20,6 +20,11 @@ public class PlaybackModeAction extends MultiAction {
     private static final int INDEX_LIST = PlayerConstants.PLAYBACK_MODE_LIST;
     private static final int INDEX_SHUFFLE = PlayerConstants.PLAYBACK_MODE_SHUFFLE;
     private static final int INDEX_REVERSE_LIST = PlayerConstants.PLAYBACK_MODE_REVERSE_LIST;
+    // KIDS v1.7.5: the repeat button index IS the playback mode (VideoPlayerGlue
+    // .setActionIndex -> MultiAction.setIndex), so the new mode needs its own slot. A
+    // 7-slot array would make setButtonState(R.id.action_repeat, mode 7) — which happens
+    // on selecting the mode and again on every video load — an out-of-bounds index.
+    private static final int INDEX_LOCK_AT_END = PlayerConstants.PLAYBACK_MODE_LOCK_AT_END;
     private final Context mContext;
 
     /**
@@ -39,7 +44,7 @@ public class PlaybackModeAction extends MultiAction {
         super(R.id.action_repeat);
 
         mContext = context;
-        Drawable[] drawables = new Drawable[7];
+        Drawable[] drawables = new Drawable[8];
         BitmapDrawable repeatNoneDrawable = (BitmapDrawable) ContextCompat.getDrawable(context, R.drawable.action_mode_none);
         BitmapDrawable repeatOneDrawable = (BitmapDrawable) ContextCompat.getDrawable(context, R.drawable.action_mode_one);
         BitmapDrawable repeatAllDrawable = (BitmapDrawable) ContextCompat.getDrawable(context, R.drawable.action_mode_all);
@@ -54,6 +59,9 @@ public class PlaybackModeAction extends MultiAction {
         drawables[INDEX_LIST] = ActionHelpers.createDrawable(context, repeatListDrawable, selectionColor);
         drawables[INDEX_SHUFFLE] = ActionHelpers.createDrawable(context, repeatShuffleDrawable, selectionColor);
         drawables[INDEX_REVERSE_LIST] = ActionHelpers.createDrawable(context, reverseListDrawable, selectionColor);
+        // KIDS v1.7.5: "Lock at end" stops after the current clip, so it borrows the stop
+        // (none) icon and relies on its label to say what it really does.
+        drawables[INDEX_LOCK_AT_END] = ActionHelpers.createDrawable(context, repeatNoneDrawable, selectionColor);
         setDrawables(drawables);
 
         String[] labels = new String[drawables.length];
@@ -65,6 +73,8 @@ public class PlaybackModeAction extends MultiAction {
         labels[INDEX_LIST] = context.getString(R.string.repeat_mode_pause_alt);
         labels[INDEX_SHUFFLE] = context.getString(R.string.repeat_mode_shuffle);
         labels[INDEX_REVERSE_LIST] = context.getString(R.string.repeat_mode_reverse_list);
+        // KIDS v1.7.5: the repeat button must name this mode, not show a blank tooltip.
+        labels[INDEX_LOCK_AT_END] = context.getString(R.string.repeat_mode_lock_at_end);
         setLabels(labels);
     }
 
