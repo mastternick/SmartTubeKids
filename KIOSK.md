@@ -112,8 +112,10 @@ Notes / troubleshooting:
    adb shell settings put secure accessibility_enabled 1
    ```
    (other flavors: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`. The
-   value replaces the whole enabled-services list, so do this only on a TV that
-   doesn't already use another accessibility service.)
+   value replaces the whole enabled-services list, so read it first — `adb shell
+   settings get secure enabled_accessibility_services` — and, if it already lists
+   something, append with a colon (`existing:app.smarttubekids/…KioskKeyGuardService`)
+   instead of overwriting it.)
 
    > **The assistant button itself is a separate case (platform limit).**
    > `KEYCODE_ASSIST` / `KEYCODE_VOICE_ASSIST` are handled in
@@ -164,6 +166,16 @@ possible.
 > refuses it, the climb-back loop still runs without the visual cover. As a
 > broken-install safety valve it stops covering after ~45 s of failed relaunches,
 > so a TV can never be left unusable by the guardian itself.
+>
+> **Android 14 (targetSdk 34) needs the foreground-service type.** The shipped
+> flavors override `targetSdkVersion` to 34 (`smarttubetv/build.gradle`: stbeta /
+> ststable / stfdroid → `project.properties.compileSdkVersion`; `constants.gradle`'s
+> 27 is *not* what ships — check with `aapt2 dump badging`). Since v1.7.2 the service
+> declares `android:foregroundServiceType="specialUse"` + the
+> `FOREGROUND_SERVICE_SPECIAL_USE` permission and the matching subtype property;
+> without them `startForeground()` throws `MissingForegroundServiceTypeException`,
+> the catch in `onCreate` stops the service, and this whole layer is dead on Android
+> TV 14 while looking perfectly fine in the code.
 
 ### Verifying the key guard on the device (if HOME still leaks)
 
@@ -262,8 +274,10 @@ repornirea TV-ului. Dezactivarea se face din
   adb shell settings put secure accessibility_enabled 1
   ```
   (alte variante: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`; comanda
-  înlocuiește întreaga listă de servicii active, folosește-o doar pe un TV care nu
-  are deja alt serviciu de accesibilitate pornit.)
+  înlocuiește întreaga listă de servicii active — citește-o întâi cu `adb shell
+  settings get secure enabled_accessibility_services` și, dacă are deja ceva,
+  adaugă cu două puncte (`existente:app.smarttubekids/…KioskKeyGuardService`) în loc
+  să suprascrii.)
 - **Recomandat (blocare totală, cu ADB):** conectează TV-ul prin ADB din rețea și
   rulează, imediat după instalare și **înainte** de a deschide aplicația:
   ```bash

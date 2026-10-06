@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools"
           package="com.liskovsoft.smartyoutubetv2.common">
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14 (API 34): the kiosk watchdog is a foreground service, and the
+         shipped flavors target 34 — without a declared type startForeground()
+         throws MissingForegroundServiceTypeException and the watchdog (kiosk
+         layer 3) silently stopped itself on Android TV 14. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 14 (API 34) -->
     <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" /> -->
     <!-- API level 34 -->
@@ -89,7 +95,16 @@
         <service
             android:name="com.liskovsoft.smartyoutubetv2.common.misc.KioskWatchdogService"
             android:enabled="true"
-            android:exported="false"/>
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <!-- The subtype property is what Android 14 asks for when a service
+                 declares specialUse; the two-argument startForeground() in
+                 KioskWatchdogService.onCreate then resolves the type from here. -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="parental-control watchdog: keeps the locked kids app on screen"
+                tools:targetApi="31" />
+        </service>
         <!-- KIDS v1.6: kiosk key guard. Accessibility input filter that blocks
              HOME / RECENTS / mic (SEARCH-ASSIST) system-wide while kiosk is ON —
              the only way to lock a TV without Device Owner (screen pinning is

@@ -245,10 +245,8 @@ public class KioskModeManager {
         }
 
         try {
-            sExitGraceUntilMs = System.currentTimeMillis() + SETUP_GRACE_MS;
+            renewKeyGuardSetupWindow(activity); // grace + drop our pin + silence the watchdog
             sKeyGuardHintShown = true; // the guidance below IS the hint — no duplicate toast on resume
-            releaseForNavigation(activity);
-            stopWatchdog(activity);
 
             openKeyGuardSettings(activity); // starts the activity via the MotherActivity hook (pin released)
 
@@ -798,6 +796,18 @@ public class KioskModeManager {
     }
 
     /**
+     * KIDS v1.7.2: renew the bypass window right before launching a system screen.
+     * Without it a trip that outlives the 5-minute grace would make the app's own
+     * onStop arm the watchdog (1 s relaunch loop + fullscreen cover) on top of
+     * App info / Accessibility — the parent would be dragged out mid-flow.
+     */
+    private static void renewKeyGuardSetupWindow(Activity activity) {
+        sExitGraceUntilMs = System.currentTimeMillis() + SETUP_GRACE_MS;
+        releaseForNavigation(activity);
+        stopWatchdog(activity);
+    }
+
+    /**
      * KIDS v1.7.2: start tracking a setup trip. Armed when the parent is sent to a
      * system screen (Accessibility / App info) and consumed by
      * {@link #checkKeyGuardSetupResult} on the resume that follows a real exit.
@@ -834,8 +844,20 @@ public class KioskModeManager {
                 return; // not back from the setup yet (or teardown) — keep the marker armed
             }
 
+            if (AppDialogPresenter.instance(activity).isDialogShown()) {
+                return; // a dialog is already up — report on the next resume, never stack
+            }
+
             sKeyGuardSetupPending = false; // one-shot: never repeat on every resume
             sKeyGuardSetupLeftApp = false;
+
+            if (!KidsPinGate.isUnlocked()) {
+                // No open parent session: still explain, but never hand out the launcher
+                // actions (App info can force-stop / clear data / uninstall, and on these
+                // TV builds screen pinning is already a no-op while the guard is off).
+                MessageHelpers.showMessage(activity, R.string.kids_kiosk_key_guard_needed);
+                return;
+            }
 
             // Give the resume transition a moment before covering it with a dialog.
             Utils.postDelayed(() -> {
@@ -898,6 +920,11 @@ public class KioskModeManager {
      */
     private static void openAppInfoSettings(Activity activity) {
         try {
+            // Renew first: the dialog usually appears minutes after startKeyGuardSetup,
+            // so the grace may be spent — without this the watchdog would fight the
+            // parent inside App info (see renewKeyGuardSetupWindow).
+            renewKeyGuardSetupWindow(activity);
+
             Intent appInfo = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
             appInfo.setData(Uri.fromParts("package", activity.getPackageName(), null));
             appInfo.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
