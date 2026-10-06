@@ -171,6 +171,17 @@ The guard filters keys **only while kiosk mode is ON** and outside an approved
 exit — with kiosk OFF every key passes through by design. If HOME still reaches
 the launcher, check the three failure modes in order:
 
+> **First, the switch that ticks itself off (Android 13+).** If the accessibility
+> toggle checks itself and then reverts, the platform's *restricted settings*
+> protection is blocking a side-loaded app: accessibility services cannot be
+> enabled until the user explicitly allows it. The app (v1.7.2) detects the failed
+> setup trip and shows a dialog with both shortcuts. Manual fix: **App info →
+> ⋮ → *Allow restricted settings*** (⋮ is the overflow menu, top-right of the App
+> info screen), then tick the guard again. No such menu on your build? Install or
+> update the APK over ADB (`adb install -r app.apk`) — ADB-installed apps are
+> exempt — or write the service straight into the secure setting with the
+> `settings put` commands above (that path bypasses the Settings UI gate).
+
 1. **Not enabled** — the service must be listed by the system:
    ```bash
    adb shell settings get secure enabled_accessibility_services
@@ -300,6 +311,19 @@ repornirea TV-ului. Dezactivarea se face din
 Paznicul filtrează taste **doar cât timp kiosk este pornit** (și în afara unei
 ieșiri aprobate) — cu kiosk oprit, toate tastele trec, prin design. Dacă HOME tot
 deschide launcherul, verifică în ordine:
+
+> **Întâi, comutatorul care se debifează singur (Android 13+).** Dacă bifa de la
+> Accesibilitate se pune singură și apoi revine, te blochează protecția
+> *restricted settings* a platformei: serviciile de accesibilitate nu pot fi
+> activate pentru o aplicație instalată manual până nu le permite utilizatorul
+> explicit. Aplicația (v1.7.2) detectează ieșirea nereușită și afișează un dialog
+> cu ambele scurtături. Remediere manuală: **App info → ⋮ → *Allow restricted
+> settings*** (⋮ este meniul din colțul dreapta-sus al ecranului App info), apoi
+> bifează din nou paznicul. Nu există acest meniu pe build-ul tău?
+> Instalează/actualizează APK-ul prin ADB (`adb install -r app.apk`) — aplicațiile
+> instalate prin ADB sunt exceptate — sau scrie serviciul direct în setarea
+> securizată cu comenzile `settings put` de mai sus (acea cale ocolește poarta din
+> interfața Setărilor).
 
 1. **Nu e activat:** `adb shell settings get secure enabled_accessibility_services`
    trebuie să conțină `app.smarttubekids/...KioskKeyGuardService`.

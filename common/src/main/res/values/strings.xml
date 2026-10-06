@@ -807,8 +807,14 @@
     <!-- KIDS v1.6: kiosk key guard (global block of HOME / RECENTS / mic) -->
     <string name="kids_kiosk_key_guard_label">SmartTube Kids kiosk key guard</string>
     <string name="kids_kiosk_key_guard_desc">Blocks the HOME, RECENTS and search/mic keys device-wide while kiosk mode is on, so the child cannot open other apps. Assistant keys are decided by the system before any app can filter them — disable the assistant app for a complete mic block (KIOSK.md). Inert while kiosk mode is off.</string>
-    <string name="kids_kiosk_key_guard_needed">For a TOTAL block (HOME, RECENTS, search/mic key, other apps): enable "SmartTube Kids kiosk key guard" in Settings → Accessibility. If the switch is greyed out, open App info → Allow restricted settings first.</string>
+    <string name="kids_kiosk_key_guard_needed">For a TOTAL block (HOME, RECENTS, search/mic key, other apps): enable "SmartTube Kids kiosk key guard" in Settings → Accessibility. If the switch is greyed out or turns itself back off, open App info → ⋮ → Allow restricted settings first.</string>
     <string name="kids_kiosk_key_guard_failed">Could not open Accessibility settings. Open Settings → Accessibility manually and enable "SmartTube Kids kiosk key guard".</string>
+    <string name="kids_kiosk_key_guard_blocked_title">Kiosk key guard is not enabled</string>
+    <string name="kids_kiosk_key_guard_blocked_why">Why does the switch turn itself off?</string>
+    <string name="kids_kiosk_key_guard_blocked_text">Android turned the switch back off on its own — that is the "restricted settings" protection from Android 13+: apps installed outside the Play Store cannot use Accessibility until the system allows it. Fix it once:\n1. Open App info (or Settings → Apps → SmartTube Kids).\n2. Open the \u22ee menu and choose "Allow restricted settings".\n3. Come back and enable "SmartTube Kids kiosk key guard" in Accessibility again.\nIf the TV has no such menu, install/update the app over ADB (adb install) or enable the service with the ADB command from KIOSK.md — those routes are not restricted.</string>
+    <string name="kids_kiosk_open_app_info">Open App info (Allow restricted settings)</string>
+    <string name="kids_kiosk_retry_accessibility">Open Accessibility again</string>
+    <string name="kids_kiosk_open_app_info_failed">Could not open App info. Open Settings → Apps → SmartTube Kids manually.</string>
     <!-- KIDS v1.3: sidebar filtering settings -->
     <string name="kids_visible_sections">Visible sections</string>
     <string name="kids_allow_search">Allow search</string>

@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
+import android.net.Uri; // KIDS v1.7.2: App info deep link (restricted-settings guidance)
 import android.os.Build;
 import android.provider.Settings; // KIDS v1.6: key guard setup / status
 import android.view.KeyEvent; // KIDS v1.6: foreground key consumption
@@ -16,11 +17,16 @@ import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
+import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem; // KIDS v1.7.2: reverted-switch dialog
+import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.views.ViewManager; // KIDS v1.7: exit-in-progress guard
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils; // KIDS v1.2.7: postDelayed / foreground check
 
 import java.lang.ref.WeakReference; // KIDS v1.2.8
+import java.util.ArrayList; // KIDS v1.7.2: reverted-switch dialog
+import java.util.List;
 
 /**
  * KIDS: Kiosk mode — the child cannot leave the app.
@@ -110,6 +116,14 @@ public class KioskModeManager {
     private static WeakReference<Activity> sPinnedActivity; // KIDS v1.2.8: the task we pinned ourselves
     private static boolean sKeyGuardHintShown; // KIDS v1.6: one key-guard hint per process
     private static long sLastBringBackMs; // KIDS v1.6: key-guard climb-back throttle
+    // KIDS v1.7.2: the parent was just sent to the Accessibility screen. Android 13+
+    // silently reverts the toggle for apps installed outside the Play Store
+    // ("restricted settings") — the switch ticks itself on, then off again. The
+    // toast shown before the trip is long gone by then, so the next resume that
+    // follows a real app exit reports the failure with an actionable dialog.
+    private static boolean sKeyGuardSetupPending;
+    private static boolean sKeyGuardSetupLeftApp; // the app really went to the background during that trip
+    private static final long KEY_GUARD_RESULT_DELAY_MS = 700; // let the resume transition settle
     // KIDS v1.7.1: the PIN exit is being carried out in THIS process right now. A resume
     // here is then part of the teardown, not a reopen, and must not clear the release —
     // the process dies ~2 s later and the fresh process would otherwise drag the app
@@ -237,6 +251,11 @@ public class KioskModeManager {
             stopWatchdog(activity);
 
             openKeyGuardSettings(activity); // starts the activity via the MotherActivity hook (pin released)
+
+            // KIDS v1.7.2: armed only once the screen really opened. checkKeyGuardSetupResult
+            // consumes it on the resume that follows a real exit — that is when we learn
+            // whether the toggle survived (Android 13+ reverts it for side-loaded APKs).
+            armKeyGuardSetupTracking();
         } catch (Throwable e) {
             Log.e(TAG, e);
             MessageHelpers.showMessage(activity, R.string.kids_kiosk_key_guard_failed);
@@ -390,6 +409,8 @@ public class KioskModeManager {
 
             sLockRequestedInProcess = false;
             sParentExitInProgress = false; // KIDS v1.7.1: no exit pending either
+            sKeyGuardSetupPending = false; // KIDS v1.7.2: no setup result to report once kiosk is off
+            sKeyGuardSetupLeftApp = false;
             setReleasedByParent(activity, false); // KIDS v1.7: nothing to bypass once kiosk is off
             stopWatchdog(activity); // KIDS v1.4: switch OFF removes the guardian immediately
         } catch (Throwable e) {
@@ -436,6 +457,7 @@ public class KioskModeManager {
                 }
                 autoLockIfNeeded(activity); // KIDS v1.2.8: also without DO = screen pinning (HOME blocked); cross-task fixed by releaseForNavigation()
                 hintKeyGuardIfNeeded(activity); // KIDS v1.6: point the parent to the full block
+                checkKeyGuardSetupResult(activity); // KIDS v1.7.2: back from the Accessibility screen — did the toggle stick?
             } else if (isLockTaskActive(activity)) {
                 stopKiosk(activity);
             } else {
@@ -464,6 +486,13 @@ public class KioskModeManager {
      */
     public static void scheduleReentry(Activity activity) {
         try {
+            // KIDS v1.7.2: the app really left the screen. While a key-guard setup trip is
+            // pending this is the proof that the parent is on the Accessibility screen —
+            // only a resume AFTER this marks "came back from the setup".
+            if (sKeyGuardSetupPending) {
+                sKeyGuardSetupLeftApp = true;
+            }
+
             if (Build.VERSION.SDK_INT < 21 || System.currentTimeMillis() < sExitGraceUntilMs
                     || isReleasedByParent(activity)
                     || !isKioskEnabled(activity)
@@ -766,6 +795,117 @@ public class KioskModeManager {
 
         sKeyGuardHintShown = true;
         MessageHelpers.showMessage(activity, R.string.kids_kiosk_key_guard_needed);
+    }
+
+    /**
+     * KIDS v1.7.2: start tracking a setup trip. Armed when the parent is sent to a
+     * system screen (Accessibility / App info) and consumed by
+     * {@link #checkKeyGuardSetupResult} on the resume that follows a real exit.
+     */
+    private static void armKeyGuardSetupTracking() {
+        sKeyGuardSetupPending = true;
+        sKeyGuardSetupLeftApp = false;
+    }
+
+    /**
+     * KIDS v1.7.2: the parent is back from the system Accessibility screen. On
+     * Android 13+ the switch silently reverts for apps installed outside the Play
+     * Store ("restricted settings"): it ticks itself on and then off again, so the
+     * parent has no way to tell why. The toast shown before the trip is long gone
+     * by then — surface an actionable dialog instead.
+     *
+     * Only fires when the trip really happened (the app left the screen) and once
+     * per setup attempt, so it can never nag on ordinary navigation.
+     */
+    private static void checkKeyGuardSetupResult(Activity activity) {
+        try {
+            if (!sKeyGuardSetupPending) {
+                return;
+            }
+
+            if (isKeyGuardEnabled(activity)) { // the toggle stuck — nothing to report
+                sKeyGuardSetupPending = false;
+                sKeyGuardSetupLeftApp = false;
+                return;
+            }
+
+            if (isDeviceOwner(activity) || !sKeyGuardSetupLeftApp
+                    || activity.isFinishing() || activity.isDestroyed()) {
+                return; // not back from the setup yet (or teardown) — keep the marker armed
+            }
+
+            sKeyGuardSetupPending = false; // one-shot: never repeat on every resume
+            sKeyGuardSetupLeftApp = false;
+
+            // Give the resume transition a moment before covering it with a dialog.
+            Utils.postDelayed(() -> {
+                try {
+                    if (activity.isFinishing() || activity.isDestroyed()
+                            || isDeviceOwner(activity) || !isKioskEnabled(activity)
+                            || isKeyGuardEnabled(activity)) {
+                        return;
+                    }
+
+                    showKeyGuardBlockedDialog(activity);
+                } catch (Throwable e) {
+                    Log.e(TAG, e);
+                }
+            }, KEY_GUARD_RESULT_DELAY_MS);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+        }
+    }
+
+    /**
+     * KIDS v1.7.2: guidance for a key guard that did not survive the setup trip.
+     * Explains the Android 13+ block and offers the two working routes — the
+     * system's "Allow restricted settings" switch (App info) and a retry of the
+     * Accessibility screen (for builds without that menu, KIOSK.md documents the
+     * ADB routes: adb install, or the settings put command).
+     */
+    private static void showKeyGuardBlockedDialog(Activity activity) {
+        String title = activity.getString(R.string.kids_kiosk_key_guard_blocked_title);
+        AppDialogPresenter dialog = AppDialogPresenter.instance(activity);
+
+        // The long-text category renders as a row that opens the explanation (TV
+        // preference UI), so it gets its own label instead of repeating the title.
+        dialog.appendLongTextCategory(activity.getString(R.string.kids_kiosk_key_guard_blocked_why),
+                UiOptionItem.from(activity.getString(R.string.kids_kiosk_key_guard_blocked_text)));
+
+        List<OptionItem> options = new ArrayList<>();
+
+        options.add(UiOptionItem.from(activity.getString(R.string.kids_kiosk_open_app_info), option -> {
+            dialog.goBack();
+            // Re-arm: when the parent comes back from App info the dialog shows again,
+            // so the "Open Accessibility again" shortcut is one press away.
+            armKeyGuardSetupTracking();
+            openAppInfoSettings(activity);
+        }));
+        options.add(UiOptionItem.from(activity.getString(R.string.kids_kiosk_retry_accessibility), option -> {
+            dialog.goBack();
+            startKeyGuardSetup(activity); // re-arms the grace window and re-opens the screen
+        }));
+        options.add(UiOptionItem.from(activity.getString(R.string.cancel_dialog), option -> dialog.goBack()));
+
+        dialog.appendStringsCategory(title, options);
+        dialog.showDialog(title);
+    }
+
+    /**
+     * KIDS v1.7.2: App info for our own package — "Allow restricted settings" lives
+     * in its overflow menu. Public API since API 9, no permission needed; on a TV
+     * build without that screen fall back to a plain message.
+     */
+    private static void openAppInfoSettings(Activity activity) {
+        try {
+            Intent appInfo = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            appInfo.setData(Uri.fromParts("package", activity.getPackageName(), null));
+            appInfo.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity.startActivity(appInfo);
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+            MessageHelpers.showMessage(activity, R.string.kids_kiosk_open_app_info_failed);
+        }
     }
 
     private static void autoLockIfNeeded(Activity activity) {
