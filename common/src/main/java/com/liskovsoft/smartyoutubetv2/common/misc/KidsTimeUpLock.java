@@ -2,6 +2,7 @@ package com.liskovsoft.smartyoutubetv2.common.misc;
 
 import android.app.Activity;
 import android.content.Context;
+import android.view.KeyEvent;
 
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
@@ -16,9 +17,14 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
  *
  * Difference from the calm exit: there the black screen is only a transition — the
  * first key press removes it and the child is back on the playlist. Here the screen
- * is a GATE: every key press is swallowed and answered with a PIN dialog, the
+ * is a GATE: every key press is swallowed and the screen stays pitch black, the
  * overlay survives the playback activity (re-applied on the resumed browse activity),
  * and only the correct Kids Mode PIN removes it.
+ *
+ * The PIN dialog is NOT shown before the child earned it: an escape key must be
+ * pressed {@link KidsTimeUpKeyGate#REQUIRED_PRESSES} times within
+ * {@link KidsTimeUpKeyGate#WINDOW_MS} (see KidsTimeUpKeyGate). One stray BACK used to
+ * pop the PIN prompt outright, which is exactly the thing the gate is meant to hide.
  *
  * The state is in-memory only (never persisted) on purpose: a locked screen must
  * never come back after an app restart — see the v1.2.0/v1.2.4 poisoned-prefs black
@@ -96,6 +102,7 @@ public class KidsTimeUpLock {
      */
     public static void armState() {
         sLocked = true;
+        KidsTimeUpKeyGate.resetSequence(); // a fresh time-out costs a fresh 10 presses
     }
 
     /**
@@ -115,9 +122,13 @@ public class KidsTimeUpLock {
 
     /**
      * Called from MotherActivity.dispatchKeyEvent while the lock is armed: swallow the
-     * key, keep the screen covered and ask for the PIN.
+     * key and keep the screen covered. The PIN dialog is opened only once the mash gate
+     * lets it through ({@link KidsTimeUpKeyGate}).
+     *
+     * @param event the key event being swallowed (non-escape keys are still swallowed —
+     *              silently, they just never reveal the PIN dialog)
      */
-    public static void onKeyPress(Activity activity) {
+    public static void onKeyPress(Activity activity, KeyEvent event) {
         if (activity == null) {
             return;
         }
@@ -134,11 +145,23 @@ public class KidsTimeUpLock {
             return;
         }
 
+        if (isEscapePress(event)) {
+            KidsTimeUpKeyGate.onEscapeKeyPressed();
+        }
+
+        if (!KidsTimeUpKeyGate.isArmed()) {
+            return; // below the threshold: NOTHING shows, the screen stays black
+        }
+
         if (System.currentTimeMillis() - sPinDialogShownAtMs < PIN_DIALOG_THROTTLE_MS) {
-            return; // dialog already open (or its failure is still fresh)
+            return; // dialog already open (or its failure is still fresh); stays armed
         }
 
         sPinDialogShownAtMs = System.currentTimeMillis();
+
+        // The dialog is about to own the key input: a second sequence must be earned
+        // again, so a cancel/BACK on the dialog does not pop it back up for free.
+        KidsTimeUpKeyGate.resetSequence();
 
         SimpleEditDialog.showPassword(
                 activity,
@@ -158,8 +181,9 @@ public class KidsTimeUpLock {
                     return false; // keep the dialog open, the screen stays black
                 },
                 () -> {
-                    // Cancel/BACK: still locked, still black. Reset the throttle at once so
-                    // the next key press can ask again.
+                    // Cancel/BACK: still locked, still black. The throttle is cleared so the
+                    // gate can arm again — but a fresh 10 escapes are required, the PIN does
+                    // not come back for free (KidsTimeUpKeyGate.resetSequence above).
                     // NOTE: this also fires after a SUCCESSFUL unlock (dismiss), hence the
                     // sLocked guard — re-covering there would trap the parent who just typed
                     // the correct PIN.
@@ -172,11 +196,57 @@ public class KidsTimeUpLock {
     }
 
     /**
+     * KIDS: one real escape press — the DOWN edge, not the auto-repeat tail of a held
+     * key (holding BACK for two seconds must NOT count as ten presses), and only for the
+     * keys a child would use to leave the app ({@link KidsTimeUpKeyGate#isEscapeKey}).
+     *
+     * Single definition on purpose: both the activity path and the guard-swallowed path
+     * ({@link #onGuardEscapeKey}) go through it.
+     */
+    public static boolean isEscapePress(KeyEvent event) {
+        return event != null
+                && event.getAction() == KeyEvent.ACTION_DOWN
+                && event.getRepeatCount() == 0
+                && KidsTimeUpKeyGate.isEscapeKey(event.getKeyCode());
+    }
+
+    /**
+     * KIDS: called by {@link KioskKeyGuardService} for the escape keys it swallows while
+     * the time-up gate is armed. With kiosk on, HOME / RECENTS never reach an activity —
+     * without this path the counter would only ever see BACK and "press HOME 10 times"
+     * would stay silent forever.
+     *
+     * The guard service shares this process (no android:process in the manifest), so the
+     * in-memory lock state and the gate below are the live ones.
+     */
+    public static void onGuardEscapeKey(KeyEvent event) {
+        if (!sLocked || !isEscapePress(event)) {
+            return;
+        }
+
+        if (!KidsTimeUpKeyGate.onEscapeKeyPressed()) {
+            return; // below the threshold: NOTHING shows, the screen stays black
+        }
+
+        Activity activity = MotherActivity.getResumedActivity();
+
+        if (activity == null) {
+            // Stay armed: the sequence is not lost. The next key that reaches an activity
+            // (or the next resume) opens the dialog — never trap a parent mid-mash.
+            Log.d(TAG, "Time-up mash complete, no resumed activity to ask for the PIN on");
+            return;
+        }
+
+        onKeyPress(activity, event);
+    }
+
+    /**
      * Drop the lock (and the overlay when an activity is given).
      */
     public static void release(Activity activity) {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        KidsTimeUpKeyGate.resetSequence();
 
         if (activity != null) {
             KidsScreenHelper.hideBlackScreen(activity);
@@ -194,5 +264,6 @@ public class KidsTimeUpLock {
     public static void releaseStateOnly() {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        KidsTimeUpKeyGate.resetSequence();
     }
 }

@@ -383,8 +383,9 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
      * OFF (default) = calm exit: the running clip finishes, then the screen fades to
      * black and the first key press returns to the playlist.
      * ON = the clip is cut the moment the daily limit expires and the screen STAYS
-     * black: every key press asks for the Kids Mode PIN, and only the correct PIN
-     * leaves that screen (no return to the playlist, no next video).
+     * black and silent: nothing is shown until an exit key (BACK / HOME) is pressed 10
+     * times within 10 seconds, only then does the PIN dialog appear, and only the correct
+     * PIN leaves that screen (no return to the playlist, no next video).
      *
      * Requires an enabled PIN — without one nobody could get past the black screen, so
      * the switch offers to set the PIN first (see KidsTimeUpLock.isForceStopActive).

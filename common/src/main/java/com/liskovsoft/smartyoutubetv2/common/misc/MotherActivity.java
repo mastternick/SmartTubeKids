@@ -1,6 +1,7 @@
 package com.liskovsoft.smartyoutubetv2.common.misc;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -37,6 +38,7 @@ import com.r0adkll.slidr.model.SlidrPosition;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.lang.ref.WeakReference;
 
 public class MotherActivity extends FragmentActivity {
     private static final String TAG = MotherActivity.class.getSimpleName();
@@ -44,6 +46,9 @@ public class MotherActivity extends FragmentActivity {
     private static final float DEFAULT_WIDTH = 1920f; // xhdpi
     private static DisplayMetrics sCachedDisplayMetrics;
     protected static boolean sIsInPipMode;
+    // KIDS: weak so a finished screen is never kept alive (set on resume, dropped on
+    // pause by the activity itself — see getResumedActivity).
+    private static WeakReference<MotherActivity> sResumedActivity;
     private ScreensaverManager mScreensaverManager;
     // Make static in case Don't keep activities enabled in Developer settings
     private static List<OnPermissions> mOnPermissions;
@@ -138,11 +143,11 @@ public class MotherActivity extends FragmentActivity {
 
         // KIDS: force stop — the time-up screen is a GATE, not a transition. EVERY key
         // event is consumed (DOWN and UP: BACK fires onBackPressed from the UP event, so
-        // swallowing only DOWN would let the child leave) and answered with the PIN
-        // dialog. Only the correct Kids Mode PIN removes the black screen.
+        // swallowing only DOWN would let the child leave). Nothing is shown: the PIN
+        // dialog appears only after 10 escape-key presses in 10 s (KidsTimeUpKeyGate).
         if (KidsTimeUpLock.isLocked()) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                KidsTimeUpLock.onKeyPress(this);
+                KidsTimeUpLock.onKeyPress(this, event);
             }
 
             return true;
@@ -249,6 +254,11 @@ public class MotherActivity extends FragmentActivity {
     @Override
     protected void onResume() {
         mIsBackPressed = false;
+
+        // KIDS: window for the time-up PIN dialog when the kiosk key guard swallows the
+        // escape key (HOME/RECENTS) before this activity ever sees it.
+        sResumedActivity = new WeakReference<>(this);
+
         try {
             super.onResume();
         } catch (IllegalArgumentException e) {
@@ -292,6 +302,11 @@ public class MotherActivity extends FragmentActivity {
     @Override
     protected void onPause() {
         super.onPause();
+
+        // Only if we are still the resumed one: another screen may already have taken over.
+        if (sResumedActivity != null && sResumedActivity.get() == this) {
+            sResumedActivity = null;
+        }
 
         // Stop managing the screensaver so a paused activity cannot keep the display awake.
         mScreensaverManager.suspend();
@@ -440,6 +455,16 @@ public class MotherActivity extends FragmentActivity {
     public static void invalidate() {
         sCachedDisplayMetrics = null;
         sIsInPipMode = false;
+        sResumedActivity = null; // KIDS: the app is going away, nothing to ask for a PIN on
+    }
+
+    /**
+     * @return the resumed app activity, or null when the app is not on screen. Used by
+     *         the time-up mash gate: the kiosk key guard swallows HOME/RECENTS before any
+     *         activity sees them, so it needs a window to show the PIN dialog on.
+     */
+    public static Activity getResumedActivity() {
+        return sResumedActivity != null ? sResumedActivity.get() : null;
     }
 
     public static DisplayMetrics getCachedDisplayMetrics() {
