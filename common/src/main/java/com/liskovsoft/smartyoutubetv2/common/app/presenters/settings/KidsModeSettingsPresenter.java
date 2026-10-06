@@ -149,6 +149,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendTimerCategory(settingsPresenter);
         appendCalmExitSwitch(settingsPresenter);
         appendForceStopSwitch(settingsPresenter); // KIDS: hard stop + PIN-locked black screen
+        appendLockAtVideoEndSwitch(settingsPresenter); // KIDS v1.7.5: end-of-video PIN lock mode
         appendExtendTimeCategory(settingsPresenter);
         appendBrightnessCategory(settingsPresenter); // KIDS: brightness also in full settings
         appendPinCategory(settingsPresenter);
@@ -418,6 +419,50 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                     });
                 },
                 mKidsData.isForceStopOnExpire()));
+    }
+
+    /**
+     * KIDS v1.7.5: "Lock the screen when a clip ends".
+     *
+     * OFF (default) = the playback-mode list looks exactly like before.
+     * ON = an extra "Lock at end" entry appears in the player's playback-mode list (and
+     * in Player settings). While that mode is selected, a clip that reaches its end stops
+     * on the PIN-locked black screen instead of playing the next one — the same gate as
+     * "Stop immediately when time is up": nothing is shown until an exit key is pressed
+     * 10 times within 10 s, then the Kids Mode PIN unlocks it.
+     *
+     * Requires an enabled PIN, exactly like the force-stop switch: without one nobody
+     * could get past the black screen, so the switch offers to set the PIN first (see
+     * KidsTimeUpLock.isLockAtEndActive).
+     */
+    private void appendLockAtVideoEndSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_lock_at_video_end),
+                getContext().getString(R.string.kids_lock_at_video_end_desc),
+                option -> {
+                    if (!option.isSelected()) {
+                        mKidsData.setLockAtVideoEnd(false);
+                        return;
+                    }
+
+                    if (mKidsData.isPinEnabled()) {
+                        mKidsData.setLockAtVideoEnd(true);
+                        return;
+                    }
+
+                    // No usable PIN: ask for one, then offer the mode. Cancel/blank leaves
+                    // the switch off (the lock is never enabled without a way out).
+                    settingsPresenter.closeDialog();
+                    MessageHelpers.showMessage(getContext(), R.string.kids_lock_at_video_end_needs_pin);
+                    showSetPinDialog(newValue -> {
+                        if (newValue != null) {
+                            setPinEnabled(true);
+                            mKidsData.setLockAtVideoEnd(true);
+                            KidsPinGate.lock(); // a fresh PIN must be typed again to unlock
+                        }
+                    });
+                },
+                mKidsData.isLockAtVideoEnd()));
     }
 
     private void appendExtendTimeCategory(AppDialogPresenter settingsPresenter) {

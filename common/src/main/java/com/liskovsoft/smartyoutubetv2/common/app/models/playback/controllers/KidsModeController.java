@@ -197,6 +197,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return false;
         }
 
+        // KIDS v1.7.5: the end-of-video lock mode never plays the next clip — the screen
+        // goes black behind the PIN gate instead (see onVideoSessionEnd).
+        if (KidsTimeUpLock.isLockAtEndActive(getContext())) {
+            return true;
+        }
+
         if (isTimeExpired()) {
             return true;
         }
@@ -223,6 +229,14 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         mIsCalmExitInProgress = true;
 
         accumulatePlayTime();
+
+        // KIDS v1.7.5: "Lock at end" playback mode — the clip reached its end, so stop on
+        // the PIN-locked black screen exactly like the daily-limit hard stop does. Same
+        // gate, same 10 escape presses, same PIN; only the trigger differs.
+        if (KidsTimeUpLock.isLockAtEndActive(getContext())) {
+            lockScreenAtVideoEnd();
+            return;
+        }
 
         // KIDS: the clip ran to its natural end with the quota full and the hard stop
         // armed (e.g. the switch was turned on mid-clip) → lock the screen exactly like
@@ -374,6 +388,41 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         } else {
             lockAndFinish.run();
         }
+    }
+
+    /**
+     * KIDS v1.7.5: the "Lock at end" playback mode — the clip ended, so go black behind the
+     * PIN gate and end the playback session.
+     *
+     * Same shape as {@link #forceStopSession()} minus the timer-specific bits: no time-up
+     * message (the quota did not expire) and nothing to silence (the clip already ended).
+     * The gate is armed BEFORE the fade so a queued next clip cannot clear the screen
+     * behind our back, and the overlay survives the player activity
+     * ({@code KidsTimeUpLock.applyOnResume} in MotherActivity), exactly like the hard stop.
+     * Unlocking needs the Kids Mode PIN after the usual 10 escape presses.
+     */
+    private void lockScreenAtVideoEnd() {
+        cancelForceStop();
+        stopCounting();
+
+        final PlaybackPresenter presenter = PlaybackPresenter.instance(getContext());
+
+        KidsTimeUpLock.armState();
+
+        final Activity activity = getActivity();
+
+        Runnable lockAndFinish = () -> {
+            KidsTimeUpLock.arm(activity);
+            presenter.forceFinish();
+        };
+
+        if (activity != null) {
+            KidsScreenHelper.fadeToBlack(activity, lockAndFinish);
+        } else {
+            lockAndFinish.run();
+        }
+
+        Log.d(TAG, "KIDS: end-of-video lock armed, screen stays black behind the PIN");
     }
 
     /**

@@ -38,6 +38,7 @@ public class KidsModeData {
     private boolean mForceStopOnExpire;  // KIDS: stop the clip the moment the daily limit expires + stay on a PIN-locked black screen
     private boolean mKioskReleased;        // KIDS: parent left the app with the PIN — stays unlocked until it's opened again
     private boolean mRelockOnBoot;         // KIDS v1.7: should a real TV reboot re-arm kiosk? (default OFF = release survives)
+    private boolean mLockAtVideoEnd;       // KIDS v1.7.5: offer the "lock at end" playback mode (black screen + PIN when a clip ends)
 
     // Daily counters (persisted so they survive app restarts)
     private String mDailyDate;             // yyyy-MM-dd of the counters
@@ -331,6 +332,33 @@ public class KidsModeData {
         persistData();
     }
 
+    // --- Lock at the end of a clip (KIDS v1.7.5) ---
+
+    /**
+     * KIDS v1.7.5: the parent wants the end-of-video lock available.
+     *
+     * OFF (default): the player's playback-mode list looks exactly like before.
+     * ON: an extra "Lock at end" entry appears in that list (and in Player settings).
+     * Selecting it makes a clip that reaches its end stop on the PIN-locked black
+     * screen — the same gate the daily-limit force stop uses — so the child needs the
+     * Kids Mode PIN (after the usual 10 escape presses) to get back to the playlist.
+     *
+     * This flag only OFFERS the mode; the behaviour additionally requires it to be the
+     * selected playback mode AND an enabled PIN (see KidsTimeUpLock.isLockAtEndActive).
+     */
+    public boolean isLockAtVideoEnd() {
+        return mLockAtVideoEnd;
+    }
+
+    public void setLockAtVideoEnd(boolean lock) {
+        if (mLockAtVideoEnd == lock) {
+            return;
+        }
+
+        mLockAtVideoEnd = lock;
+        persistData();
+    }
+
     // --- Hidden parent pins (KIDS F4) ---
 
     /**
@@ -411,6 +439,7 @@ public class KidsModeData {
         mForceStopOnExpire    = Helpers.parseBoolean(split, 17, false); // KIDS: force stop default OFF (calm exit stays)
         mKioskReleased        = Helpers.parseBoolean(split, 18, false); // KIDS: PIN exit release (default locked)
         mRelockOnBoot         = Helpers.parseBoolean(split, 19, false); // KIDS v1.7: reboot re-arms kiosk? (default: no)
+        mLockAtVideoEnd       = Helpers.parseBoolean(split, 20, false); // KIDS v1.7.5: offer "lock at end"? (default: no)
     }
 
     private void persistData() {
@@ -419,6 +448,7 @@ public class KidsModeData {
                         mBlockShorts, mBlockRecommendations, mCalmExit,
                         mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
-                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot));
+                        mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
+                        mLockAtVideoEnd));
     }
 }

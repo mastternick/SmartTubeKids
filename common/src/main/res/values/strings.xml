@@ -121,6 +121,7 @@
     <string name="repeat_mode_pause">Pause playback after each video (except queue)</string>
     <string name="repeat_mode_pause_alt">Play only playlist videos continuously</string>
     <string name="repeat_mode_none">Stop playback after one video (except queue)</string>
+    <string name="repeat_mode_lock_at_end">Lock at end (black screen + PIN)</string>
     <string name="subscribed_to_channel">Subscribed</string>
     <string name="unsubscribed_from_channel">Unsubscribed</string>
     <string name="subtitle_yellow_transparent">Yellow on transparent background</string>
@@ -773,6 +774,9 @@
     <string name="kids_force_stop_desc">Cut the running clip the instant the daily limit expires. The screen goes black and stays black and silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times within 10 seconds — only then does the Kids Mode PIN dialog appear, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
     <string name="kids_force_stop_needs_pin">Stopping immediately needs a PIN to leave the black screen. Set one now.</string>
     <string name="kids_time_up_pin_hint">Time is up for today. Enter the PIN to continue.</string>
+    <string name="kids_lock_at_video_end">Lock the screen when a clip ends</string>
+    <string name="kids_lock_at_video_end_desc">Adds a Lock at end entry to the player playback-mode list. While that mode is selected, a clip that reaches its end stops on a black screen and stays silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times within 10 seconds — only then does the Kids Mode PIN dialog appear, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
+    <string name="kids_lock_at_video_end_needs_pin">The end-of-video lock needs a PIN to unlock the black screen. Set one now.</string>
     <string name="kids_pin">PIN protection</string>
     <string name="kids_pin_enable">Enable PIN</string>
     <string name="kids_pin_enable_desc">Protect Kids Mode and all Settings with a PIN. Disabling takes effect immediately.</string>

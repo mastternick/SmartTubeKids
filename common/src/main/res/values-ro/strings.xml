@@ -117,6 +117,7 @@
   <string name="repeat_mode_pause">Întrerupeți redarea după fiecare videoclip</string>
   <string name="repeat_mode_pause_alt">Redă continuu numai videoclipuri playlist</string>
   <string name="repeat_mode_none">Opriți redarea după un videoclip</string>
+  <string name="repeat_mode_lock_at_end">Blochează la final (ecran negru + PIN)</string>
   <string name="unsubscribed_from_channel">Dezabonat</string>
   <string name="subscribed_to_channel">Abonat</string>
   <string name="subtitle_yellow_transparent">Galben pe fundal transparent</string>
@@ -698,4 +699,7 @@
   <string name="kids_force_stop_desc">Taie clipul în momentul în care expiră limita zilnică. Ecranul devine negru și rămâne negru și mut: nu apare nimic până când o tastă de ieșire (BACK sau HOME, când paznicul de taste kiosk este activ) este apăsată de 10 ori în maximum 10 secunde — doar atunci apare dialogul PIN-ului Kids Mode, iar numai PIN-ul corect închide acel ecran. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
   <string name="kids_force_stop_needs_pin">Oprirea imediată are nevoie de un PIN pentru a ieși din ecranul negru. Setează unul acum.</string>
   <string name="kids_time_up_pin_hint">Timpul s-a terminat pe azi. Introdu PIN-ul pentru a continua.</string>
+  <string name="kids_lock_at_video_end">Blochează ecranul când se termină clipul</string>
+  <string name="kids_lock_at_video_end_desc">Adaugă intrarea Blochează la final în lista de moduri de redare din player. Cât timp acel mod este selectat, un clip care ajunge la final se oprește pe ecran negru și rămâne mut: nu apare nimic până când o tastă de ieșire (BACK sau HOME, când paznicul de taste kiosk este activ) este apăsată de 10 ori în maximum 10 secunde — doar atunci apare dialogul PIN-ului Kids Mode, iar numai PIN-ul corect închide acel ecran. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
+  <string name="kids_lock_at_video_end_needs_pin">Blocarea la finalul clipului are nevoie de un PIN pentru a ieși din ecranul negru. Setează unul acum.</string>
 </resources>

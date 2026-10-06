@@ -42,6 +42,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.MotherActivity;
 import com.liskovsoft.smartyoutubetv2.common.prefs.SponsorBlockData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData; // KIDS v1.7.5: lock-at-end mode entry
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
 import com.liskovsoft.youtubeapi.service.YouTubeMediaItemService;
@@ -849,6 +850,19 @@ public class AppDialogUtil {
                         onModeSelected.run();
                     },
                     playerData.getPlaybackMode() == pair[1]
+            ));
+        }
+
+        // KIDS v1.7.5: the end-of-video lock is a Kids Mode feature, so its entry exists
+        // only while the parent enabled it (Kids Mode → "Lock the screen when a clip
+        // ends"). Same radio semantics as the rest of the list.
+        if (KidsModeData.instance(context).isLockAtVideoEnd()) {
+            options.add(UiOptionItem.from(context.getString(R.string.repeat_mode_lock_at_end),
+                    optionItem -> {
+                        playerData.setPlaybackMode(PlayerConstants.PLAYBACK_MODE_LOCK_AT_END);
+                        onModeSelected.run();
+                    },
+                    playerData.getPlaybackMode() == PlayerConstants.PLAYBACK_MODE_LOCK_AT_END
             ));
         }
 

@@ -7,7 +7,9 @@ import android.view.KeyEvent;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
+import com.liskovsoft.smartyoutubetv2.common.app.models.playback.manager.PlayerConstants;
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
+import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 
@@ -73,13 +75,52 @@ public class KidsTimeUpLock {
      * "expired → cannot leave the black screen without the PIN" still holds.
      */
     public static boolean isForceStopActive(Context context) {
+        return isKidsGateOpen(context) && KidsModeData.instance(context).isForceStopOnExpire();
+    }
+
+    /**
+     * KIDS v1.7.5: the end-of-video lock is armed — Kids Mode on, a PIN to unlock with,
+     * no open parent session, the parent offered the mode in Kids Mode
+     * ({@link KidsModeData#isLockAtVideoEnd}) AND it is the player's current playback
+     * mode. The mode value alone is not enough: turning the Kids switch off must disarm
+     * the lock even if the selection lingers in {@code PlayerData}.
+     */
+    public static boolean isLockAtEndActive(Context context) {
+        return isKidsGateOpen(context) && isLockAtEndModeSelected(context);
+    }
+
+    /**
+     * KIDS: does the PIN gate apply at all right now? True when EITHER reason is armed —
+     * the daily-limit force stop ({@link #isForceStopActive}) or the end-of-video lock
+     * ({@link #isLockAtEndActive}).
+     *
+     * Used by the gate itself (releasing on the first key press when no reason is armed
+     * any more, so nobody is ever trapped). The timer path keeps calling
+     * {@link #isForceStopActive} so its semantics stay untouched.
+     */
+    public static boolean isGateActive(Context context) {
+        return isKidsGateOpen(context)
+                && (KidsModeData.instance(context).isForceStopOnExpire() || isLockAtEndModeSelected(context));
+    }
+
+    /**
+     * KIDS: may a Kids-mode gate arm at all? Kids Mode on + a PIN to unlock with +
+     * no open parent session.
+     */
+    private static boolean isKidsGateOpen(Context context) {
         if (context == null || KidsPinGate.isUnlocked()) {
             return false;
         }
 
         KidsModeData data = KidsModeData.instance(context);
 
-        return data.isEnabled() && data.isForceStopOnExpire() && data.isPinEnabled();
+        return data.isEnabled() && data.isPinEnabled();
+    }
+
+    /** KIDS v1.7.5: the parent offered the end-of-video lock AND the player is in that mode. */
+    private static boolean isLockAtEndModeSelected(Context context) {
+        return KidsModeData.instance(context).isLockAtVideoEnd()
+                && PlayerData.instance(context).getPlaybackMode() == PlayerConstants.PLAYBACK_MODE_LOCK_AT_END;
     }
 
     /**
@@ -121,11 +162,20 @@ public class KidsTimeUpLock {
 
         // KIDS: a mash that completed while no activity could host the dialog (the kiosk
         // key guard swallows HOME even when the app is off screen) is still armed — this
-        // resume is the moment it can finally be answered. A null event never counts as a
-        // press (isEscapePress(null) is false), so this cannot re-arm anything by itself.
+        // resume is the moment it can finally be answered. Posted on purpose:
+        // ActivityThread.handleResumeActivity runs onResume BEFORE wm.addView(decor), so
+        // showing an AlertDialog inline here would hit BadTokenException on a fresh launch
+        // (exactly the guard case: bringAppBack starts the activity from cold) and, because
+        // the gate is consumed before showPassword, the earned 10 presses would be lost.
+        // A null event never counts as a press (isEscapePress(null) is false), so this
+        // cannot re-arm anything by itself.
         if (KidsTimeUpKeyGate.isArmed()) {
             Log.d(TAG, "Time-up mash armed from the key guard: asking for the PIN on resume");
-            onKeyPress(activity, null);
+            Utils.post(() -> {
+                if (sLocked) {
+                    onKeyPress(activity, null);
+                }
+            });
         }
     }
 
@@ -147,9 +197,9 @@ public class KidsTimeUpLock {
 
         final KidsModeData data = KidsModeData.instance(activity);
 
-        // Release without asking when the gate no longer applies — Kids Mode, force stop
-        // or the PIN was turned off meanwhile. Never trap anybody.
-        if (!isForceStopActive(activity)) {
+        // Release without asking when the gate no longer applies — Kids Mode, force stop, the
+        // end-of-video mode or the PIN was turned off meanwhile. Never trap anybody.
+        if (!isGateActive(activity)) {
             release(activity);
             return;
         }

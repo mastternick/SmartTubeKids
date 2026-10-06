@@ -10,6 +10,15 @@ public interface PlayerConstants {
     int PLAYBACK_MODE_SHUFFLE = 4;
     int PLAYBACK_MODE_LIST = 5;
     int PLAYBACK_MODE_REVERSE_LIST = 6;
+    /**
+     * KIDS: when the current clip reaches its end, stop on the PIN-locked black screen
+     * instead of playing the next one (the same gate the daily-limit force stop uses).
+     *
+     * Offered in the playback-mode list ONLY while the parent enabled it in Kids Mode
+     * (see KidsModeData.isLockAtVideoEnd) and deliberately kept OUT of the repeat button
+     * cycle: a short press must never drop a child into a locked screen.
+     */
+    int PLAYBACK_MODE_LOCK_AT_END = 7;
     int BACKGROUND_MODE_DEFAULT = 0;
     int BACKGROUND_MODE_SOUND = 1;
     int BACKGROUND_MODE_PIP = 2;
