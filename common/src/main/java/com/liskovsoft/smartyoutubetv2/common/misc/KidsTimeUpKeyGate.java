@@ -9,9 +9,12 @@ package com.liskovsoft.smartyoutubetv2.common.misc;
  * completely silent until an escape key has been pressed {@link #REQUIRED_PRESSES}
  * times inside {@link #WINDOW_MS}; only then does the PIN dialog appear.
  *
- * Counted presses are escape attempts only (BACK / HOME / RECENTS / ESCAPE / assist /
- * mic — {@link #isEscapeKey}). Navigation keys are still swallowed, they just never
- * reveal the dialog: a child mashing arrows or OK gets nothing.
+ * Counted presses are escape attempts only (BACK / HOME / RECENTS / ESCAPE —
+ * {@link #isEscapeKey}). Navigation keys are still swallowed, they just never reveal
+ * the dialog: a child mashing arrows or OK gets nothing. The mic / assistant keys are
+ * NOT counted either — mashing the microphone is the most likely thing a child does in
+ * front of a black screen, and it must not surface the PIN prompt (the user asked for
+ * "nothing appears" until an exit key has been pressed).
  *
  * Both key paths feed the SAME counter, because with the kiosk key guard enabled HOME
  * and RECENTS are swallowed device-wide and never reach an activity:
@@ -29,23 +32,18 @@ public final class KidsTimeUpKeyGate {
     /** Press 1 and press {@link #REQUIRED_PRESSES} must be at most this far apart. */
     public static final long WINDOW_MS = 10_000L;
 
-    // Literals on purpose. Two reasons, both load-bearing:
-    //  - this file must stay free of Android imports so the counting rule is testable
-    //    with plain javac/java (no SDK, no gradle — see BUILD-POLICY.md);
-    //  - ASSIST (219) / VOICE_ASSIST (231) are above minSdk 17 and lint runs with
-    //    abortOnError true if they are referenced as constants (KioskModeManager.isEscapeKey).
+    // Literals on purpose: this file must stay free of Android imports so the counting
+    // rule is testable with plain javac/java (no SDK, no gradle — see BUILD-POLICY.md).
     private static final int KEYCODE_HOME = 3;           // KeyEvent.KEYCODE_HOME
     private static final int KEYCODE_BACK = 4;           // KeyEvent.KEYCODE_BACK
     private static final int KEYCODE_ESCAPE = 111;       // KeyEvent.KEYCODE_ESCAPE
     private static final int KEYCODE_APP_SWITCH = 187;   // KeyEvent.KEYCODE_APP_SWITCH (RECENTS)
-    private static final int KEYCODE_ASSIST = 219;       // KeyEvent.KEYCODE_ASSIST
-    private static final int KEYCODE_VOICE_ASSIST = 231; // KeyEvent.KEYCODE_VOICE_ASSIST (mic button)
 
     private static int sCount;
     private static long sFirstPressMs;
     // Threshold reached. Sticky: it survives a caller that could not open the dialog
     // (no resumed activity, dialog throttled) so the escape attempt is never lost and
-    // the next press does show the PIN. Cleared by resetSequence() / reset().
+    // the next press does show the PIN. Cleared by resetSequence().
     private static boolean sArmed;
 
     private KidsTimeUpKeyGate() {
@@ -111,9 +109,11 @@ public final class KidsTimeUpKeyGate {
      *
      * Deliberately ABSENT:
      *  - POWER / VOLUME / MEDIA / DPAD / OK: not escape attempts;
-     *  - SEARCH and EXPLORER (browser key): the kiosk key guard swallows them too, but
-     *    they do not take the child out of the app, so mashing the mic button must never
-     *    surface the PIN prompt;
+     *  - SEARCH (84) and EXPLORER (64, browser key): the kiosk key guard swallows them
+     *    too, but they do not take the child out of the app;
+     *  - ASSIST (219) and VOICE_ASSIST (231, the mic button): not exit keys, and mashing
+     *    the microphone is the most likely toddler reaction to a black screen — counting
+     *    it would pop the PIN prompt with exactly the presses the gate is meant to ignore;
      *  - MENU: opens in-app menus.
      */
     public static boolean isEscapeKey(int keyCode) {
@@ -122,8 +122,6 @@ public final class KidsTimeUpKeyGate {
             case KEYCODE_HOME:
             case KEYCODE_APP_SWITCH: // RECENTS
             case KEYCODE_ESCAPE:
-            case KEYCODE_ASSIST:
-            case KEYCODE_VOICE_ASSIST:
                 return true;
             default:
                 return false;

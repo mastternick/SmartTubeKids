@@ -118,6 +118,15 @@ public class KidsTimeUpLock {
             KidsScreenHelper.showBlackScreen(activity);
             Log.d(TAG, "Time-up lock re-applied on %s", activity.getClass().getSimpleName());
         }
+
+        // KIDS: a mash that completed while no activity could host the dialog (the kiosk
+        // key guard swallows HOME even when the app is off screen) is still armed — this
+        // resume is the moment it can finally be answered. A null event never counts as a
+        // press (isEscapePress(null) is false), so this cannot re-arm anything by itself.
+        if (KidsTimeUpKeyGate.isArmed()) {
+            Log.d(TAG, "Time-up mash armed from the key guard: asking for the PIN on resume");
+            onKeyPress(activity, null);
+        }
     }
 
     /**
@@ -151,6 +160,12 @@ public class KidsTimeUpLock {
 
         if (!KidsTimeUpKeyGate.isArmed()) {
             return; // below the threshold: NOTHING shows, the screen stays black
+        }
+
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            // No window to host the dialog: leave the gate armed (the mash is not lost) and
+            // do NOT burn the throttle — the next usable activity consumes it (applyOnResume).
+            return;
         }
 
         if (System.currentTimeMillis() - sPinDialogShownAtMs < PIN_DIALOG_THROTTLE_MS) {
@@ -232,12 +247,20 @@ public class KidsTimeUpLock {
 
         if (activity == null) {
             // Stay armed: the sequence is not lost. The next key that reaches an activity
-            // (or the next resume) opens the dialog — never trap a parent mid-mash.
+            // (or the next resume, see KidsTimeUpLock.applyOnResume) opens the dialog — never
+            // trap a parent mid-mash.
             Log.d(TAG, "Time-up mash complete, no resumed activity to ask for the PIN on");
             return;
         }
 
-        onKeyPress(activity, event);
+        // Leave the input-filter callback before adding a window: this runs for EVERY key on
+        // the device, and showing an AlertDialog while this very HOME event is still being
+        // dispatched can hand it a stray event / lose focus on some TV builds.
+        Utils.post(() -> {
+            if (sLocked) {
+                onKeyPress(activity, event);
+            }
+        });
     }
 
     /**
