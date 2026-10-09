@@ -10,6 +10,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsQuotaWindow;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
 import com.liskovsoft.smartyoutubetv2.common.misc.TickleManager;
@@ -17,16 +18,13 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.youtubeapi.service.internal.MediaServiceData;
 
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.Locale;
-
 /**
  * KIDS: Kids Mode controller — implements the Calm Exit concept.
  *
  * Responsibilities:
- *  - Count real watch minutes per day (daily limit).
+ *  - Count real watch minutes inside the current reset window (see KidsQuotaWindow).
+ *  - Countdown badge: remaining time in the top-right corner once the parent-configured
+ *    lead time is reached (KidsCountdownBadge).
  *  - Calm exit warnings at -5 / -2 / -1 minutes before limit.
  *  - Hard stop: current video always finishes, then playback closes (no cliffhanger mid-video).
  *  - KIDS force stop (optional): the clip is cut the instant the limit expires and the
@@ -43,9 +41,8 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     // delta never exceeds ~1 min. Anything much bigger means the process was frozen
     // (TV standby/doze), not the child watching — such gaps must never be counted.
     // The old 12h guard let an entire overnight standby gap (< 12h) pass through and
-    // credited it to the NEW day right after the midnight reset — that is why the
-    // daily counter appeared to "not reset at 00:00" and the limit looked exhausted
-    // all day.
+    // credited it to the NEW window right after the reset — that is why the counter
+    // appeared to "not reset" and the limit looked exhausted all day.
     private static final long MAX_REAL_PLAY_GAP_MS = 3 * 60_000L;
 
     private KidsModeData mKidsData;
@@ -275,9 +272,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return;
         }
 
-        // KIDS FIX: roll the day over even when nothing is playing, so warnings and
-        // the time-up message use the fresh daily quota right after local midnight.
-        resetDailyIfNeeded();
+        // KIDS FIX: roll the window over even when nothing is playing, so warnings and
+        // the time-up message use the fresh quota right after a reset boundary.
+        resetWindowIfNeeded();
         accumulatePlayTime();
         checkWarnings();
 
@@ -426,24 +423,49 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     }
 
     /**
-     * True when today's watch limit (plus any parent bonus) is reached.
+     * True when the current window's watch limit (plus any parent bonus) is reached.
      */
     public boolean isTimeExpired() {
         if (!isActive()) {
             return false;
         }
 
-        resetDailyIfNeeded();
+        resetWindowIfNeeded();
 
-        return mKidsData.getDailyUsedMs() >= getLimitMs();
+        return mKidsData.getUsedMs() >= getLimitMs();
     }
 
     private long getLimitMs() {
-        return (mKidsData.getTimerMinutes() * 60_000L) + mKidsData.getDailyBonusMs();
+        return KidsQuotaWindow.limitMs(mKidsData.getTimerMinutes(), mKidsData.getBonusMs());
     }
 
     private long getRemainingMs() {
-        return Math.max(0, getLimitMs() - mKidsData.getDailyUsedMs());
+        return KidsQuotaWindow.remainingMs(getLimitMs(), mKidsData.getUsedMs());
+    }
+
+    /**
+     * KIDS v1.8: play time already measured but not persisted yet, so the countdown badge can
+     * tick every second instead of freezing until the next ~1 min tickle and then jumping.
+     * Bounded by the same gap guard the counter uses, so a frozen process (TV standby) can never
+     * inflate what the badge shows.
+     *
+     * @return 0 while nothing is playing.
+     */
+    public long getUnflushedPlayMs() {
+        long now = System.currentTimeMillis();
+
+        if (mLastPlayStartMs == 0) {
+            return 0;
+        }
+
+        long start = Math.max(mLastPlayStartMs, getWindowStartMs(now));
+        long delta = now - start;
+
+        return delta > 0 && delta < MAX_REAL_PLAY_GAP_MS ? delta : 0;
+    }
+
+    private long getWindowStartMs(long nowMs) {
+        return KidsQuotaWindow.windowStartMs(nowMs, mKidsData.getResetIntervalHours());
     }
 
     private void stopCounting() {
@@ -459,45 +481,38 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         long now = System.currentTimeMillis();
 
-        // KIDS FIX: roll the day over first, then only count the part of the gap that
-        // falls inside today (local time). A session that crosses 00:00 must not push
-        // yesterday's minutes onto the new day's fresh counter.
-        resetDailyIfNeeded();
-        long start = Math.max(mLastPlayStartMs, getStartOfTodayMs(now));
+        // KIDS FIX: roll the window over first, then only count the part of the gap that falls
+        // inside it. A session that crosses the boundary must not push the previous window's
+        // minutes onto the fresh counter.
+        resetWindowIfNeeded();
+        long start = Math.max(mLastPlayStartMs, getWindowStartMs(now));
         long delta = now - start;
         mLastPlayStartMs = now; // keep counting if still playing
 
         if (delta > 0 && delta < MAX_REAL_PLAY_GAP_MS) {
-            mKidsData.addDailyUsedMs(delta);
+            mKidsData.addUsedMs(delta);
         } else if (delta >= MAX_REAL_PLAY_GAP_MS) {
             Log.d(TAG, "Ignoring non-play gap of %s ms (standby/frozen process)", delta);
         }
     }
 
     /**
-     * KIDS FIX: epoch millis of local midnight (00:00) of the day containing nowMs.
+     * KIDS v1.8: roll the counters over when the reset window moved on. Boundaries are ALIGNED to
+     * the interval (see KidsQuotaWindow.windowStartMs), so the 24 h default keeps resetting at
+     * local midnight exactly like every earlier build did.
      */
-    private long getStartOfTodayMs(long nowMs) {
-        Calendar cal = Calendar.getInstance(); // device local timezone
-        cal.setTimeInMillis(nowMs);
-        cal.set(Calendar.HOUR_OF_DAY, 0);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-        return cal.getTimeInMillis();
-    }
+    private void resetWindowIfNeeded() {
+        long now = System.currentTimeMillis();
+        int intervalHours = mKidsData.getResetIntervalHours();
 
-    private void resetDailyIfNeeded() {
-        String today = todayKey();
-
-        if (!today.equals(mKidsData.getDailyDate())) {
-            mKidsData.setDailyDate(today);
-            mKidsData.setDailyUsedMs(0);
-            mKidsData.setDailyBonusMs(0);
-            resetWarnings();
-            // KIDS: a new day means a fresh quota — never keep the child locked past midnight
-            KidsTimeUpLock.releaseStateOnly();
+        if (!KidsQuotaWindow.isWindowExpired(mKidsData.getWindowStartMs(), now, intervalHours)) {
+            return;
         }
+
+        mKidsData.resetWindow(KidsQuotaWindow.windowStartMs(now, intervalHours));
+        resetWarnings();
+        // KIDS: a fresh window means a fresh quota — never keep the child locked past the reset
+        KidsTimeUpLock.releaseStateOnly();
     }
 
     private void checkWarnings() {
@@ -563,9 +578,5 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // KIDS: the parent granted more time — drop the time-up gate and its overlay
         KidsTimeUpLock.releaseStateOnly();
         scheduleForceStop();
-    }
-
-    private String todayKey() {
-        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
     }
 }

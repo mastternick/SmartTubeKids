@@ -760,20 +760,24 @@
 
     <!-- KIDS: Kids Mode strings (English base, translatable) -->
     <string name="kids_mode">Kids Mode</string>
-    <string name="kids_mode_desc">Parental controls for young children: block Shorts, block recommendations, daily watch time limit with calm exit. Protected with a PIN.</string>
+    <string name="kids_mode_desc">Parental controls for young children: block Shorts, block recommendations, watch time limit with calm exit. Protected with a PIN.</string>
     <string name="kids_mode_enable">Enable Kids Mode</string>
     <string name="kids_block_shorts">Block Shorts</string>
     <string name="kids_block_recommendations">Block recommendations</string>
     <string name="kids_block_recommendations_desc">No next videos at the end of a clip, no suggestion rows</string>
-    <string name="kids_timer">Daily time limit</string>
+    <string name="kids_timer">Time limit</string>
     <string name="kids_timer_desc">Current video always finishes, then playback stops</string>
     <string name="kids_timer_off">No limit</string>
+    <!-- KIDS v1.8: quota reset window + remaining-time countdown -->
+    <string name="kids_reset_interval">Reset interval</string>
+    <string name="kids_countdown_warning">Remaining-time countdown</string>
+    <string name="kids_countdown_off">Off</string>
     <string name="kids_calm_exit">Calm exit warnings</string>
     <string name="kids_calm_exit_desc">Show friendly warnings 5, 2 and 1 minute before time is up</string>
     <string name="kids_force_stop">Stop immediately when time is up</string>
-    <string name="kids_force_stop_desc">Cut the running clip the instant the daily limit expires. The screen goes black and stays black and silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times within 10 seconds — only then does the Kids Mode PIN dialog appear, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
+    <string name="kids_force_stop_desc">Cut the running clip the instant the limit expires. The screen goes black and stays black and silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times within 10 seconds — only then does the Kids Mode PIN dialog appear, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
     <string name="kids_force_stop_needs_pin">Stopping immediately needs a PIN to leave the black screen. Set one now.</string>
-    <string name="kids_time_up_pin_hint">Time is up for today. Enter the PIN to continue.</string>
+    <string name="kids_time_up_pin_hint">Time is up. Enter the PIN to continue.</string>
     <string name="kids_lock_at_video_end">Lock the screen when a clip ends</string>
     <string name="kids_lock_at_video_end_desc">Adds a Lock at end entry to the player playback-mode list. While that mode is selected, a clip that reaches its end stops on a black screen and stays silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times within 10 seconds — only then does the Kids Mode PIN dialog appear, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
     <string name="kids_lock_at_video_end_needs_pin">The end-of-video lock needs a PIN to unlock the black screen. Set one now.</string>
@@ -788,9 +792,8 @@
     <string name="kids_wrong_pin">Wrong PIN</string>
     <string name="kids_extend_time">Extend time</string>
     <string name="kids_time_left">Kids Mode: %s minute(s) of watching left</string>
-    <string name="kids_time_up">Kids Mode: time is up for today. See you tomorrow!</string>
+    <string name="kids_time_up">Kids Mode: time is up. See you next time!</string>
     <string name="kids_shorts_blocked">Shorts are blocked in Kids Mode</string>
-    <string name="kids_status">Today: %1$s of %2$s watched</string>
     <string name="kids_brightness">Screen brightness</string>
     <string name="kids_brightness_auto">Auto (system)</string>
     <string name="kids_mode_settings">Kids Mode settings…</string>

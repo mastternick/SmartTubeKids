@@ -9,6 +9,7 @@ import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.autoframerate.ModeSyncManager;
 import com.liskovsoft.smartyoutubetv2.common.misc.GlobalKeyTranslator;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsCountdownBadge; // KIDS v1.8
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS v1.2.8
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MotherActivity;
@@ -84,6 +85,18 @@ public abstract class LeanbackActivity extends MotherActivity {
         mModeSyncManager.restore(this);
 
         getViewManager().addTop(this);
+
+        // KIDS v1.8: bring the remaining-time countdown back on the incoming screen (a badge
+        // is a decor view of ONE activity, so every screen switch has to re-apply it).
+        KidsCountdownBadge.applyOnResume(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        // KIDS v1.8: the badge belongs to this screen; the next resumed one re-applies it.
+        KidsCountdownBadge.onPause(this);
     }
 
     @Override

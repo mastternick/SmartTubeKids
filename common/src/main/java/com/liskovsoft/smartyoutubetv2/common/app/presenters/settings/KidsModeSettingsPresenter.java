@@ -147,7 +147,9 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
+        appendResetIntervalCategory(settingsPresenter); // KIDS v1.8: how often the watch limit resets
         appendCalmExitSwitch(settingsPresenter);
+        appendCountdownWarningCategory(settingsPresenter); // KIDS v1.8: top-right remaining-time countdown
         appendForceStopSwitch(settingsPresenter); // KIDS: hard stop + PIN-locked black screen
         appendLockAtVideoEndSwitch(settingsPresenter); // KIDS v1.7.5: end-of-video PIN lock mode
         appendExtendTimeCategory(settingsPresenter);
@@ -370,6 +372,43 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_timer), options);
     }
 
+    /**
+     * KIDS v1.8: how often the watch limit resets. Boundaries are aligned to the chosen
+     * interval — 24 h (the default) keeps resetting at local midnight, exactly like every
+     * earlier build; 6 h resets at 00:00 / 06:00 / 12:00 / 18:00 (see KidsQuotaWindow).
+     */
+    private void appendResetIntervalCategory(AppDialogPresenter settingsPresenter) {
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int hours : KidsModeData.RESET_INTERVAL_HOURS) {
+            options.add(UiOptionItem.from(hours + " h",
+                    option -> mKidsData.setResetIntervalHours(hours),
+                    mKidsData.getResetIntervalHours() == hours));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_reset_interval), options);
+    }
+
+    /**
+     * KIDS v1.8: when the remaining-time countdown appears in the top-right corner. It is
+     * purely informational — it never gates keys and never replaces the calm-exit warnings,
+     * and the hard stop keeps working exactly as before when it is off.
+     */
+    private void appendCountdownWarningCategory(AppDialogPresenter settingsPresenter) {
+        List<OptionItem> options = new ArrayList<>();
+
+        for (int minutes : KidsModeData.WARN_BEFORE_MINUTES) {
+            options.add(UiOptionItem.from(
+                    minutes == 0
+                            ? getContext().getString(R.string.kids_countdown_off)
+                            : minutes + " min",
+                    option -> mKidsData.setWarnBeforeMinutes(minutes),
+                    mKidsData.getWarnBeforeMinutes() == minutes));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_countdown_warning), options);
+    }
+
     private void appendCalmExitSwitch(AppDialogPresenter settingsPresenter) {
         settingsPresenter.appendSingleSwitch(UiOptionItem.from(
                 getContext().getString(R.string.kids_calm_exit),
@@ -471,7 +510,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         for (int minutes : EXTEND_OPTIONS_MIN) {
             options.add(UiOptionItem.from("+" + minutes + " min",
                     option -> {
-                        mKidsData.setDailyBonusMs(mKidsData.getDailyBonusMs() + minutes * 60_000L);
+                        mKidsData.setBonusMs(mKidsData.getBonusMs() + minutes * 60_000L);
                         AppDialogPresenter.instance(getContext()).closeDialog();
                         // KIDS: more time granted — release a time-up lock and let the next
                         // video play (the exact hard stop is re-armed by the controller).

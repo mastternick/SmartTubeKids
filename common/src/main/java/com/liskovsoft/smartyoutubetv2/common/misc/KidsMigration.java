@@ -60,8 +60,8 @@ public class KidsMigration {
             if (!"1".equals(prefs.getData(FLAG_KEY_DAILY_RESET_FIX))) {
                 KidsModeData kids = KidsModeData.instance(context);
 
-                kids.setDailyUsedMs(0);
-                kids.setDailyBonusMs(0);
+                kids.setUsedMs(0);
+                kids.setBonusMs(0);
 
                 prefs.setData(FLAG_KEY_DAILY_RESET_FIX, "1");
 

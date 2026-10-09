@@ -8,11 +8,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * KIDS: Persistent storage for Kids Mode settings + daily watch-time counters.
+ * KIDS: Persistent storage for Kids Mode settings + watch-time counters.
  * Pattern follows existing prefs classes (SponsorBlockData, SearchData).
  */
 public class KidsModeData {
     private static final String KIDS_MODE_DATA = "kids_mode_data";
+
+    /**
+     * KIDS v1.8: default length of the quota reset window in hours.
+     * 24 keeps the behaviour every earlier build had (one reset per day).
+     */
+    public static final int DEFAULT_RESET_INTERVAL_HOURS = 24;
+
+    /**
+     * KIDS v1.8: default lead time of the top-right countdown badge, in minutes.
+     */
+    public static final int DEFAULT_WARN_BEFORE_MINUTES = 5;
+
+    /** KIDS v1.8: reset-window lengths the parent can choose from (hours). */
+    public static final int[] RESET_INTERVAL_HOURS = {1, 3, 6, 8, 12, 24};
+
+    /** KIDS v1.8: countdown lead times the parent can choose from (minutes, 0 = off). */
+    public static final int[] WARN_BEFORE_MINUTES = {0, 1, 2, 3, 5, 10, 15, 30};
 
     @SuppressLint("StaticFieldLeak")
     private static KidsModeData sInstance;
@@ -22,7 +39,7 @@ public class KidsModeData {
     private boolean mIsEnabled;
     private String mPin;                   // null = no PIN set
     private boolean mIsPinEnabled;         // KIDS: PIN protection on/off (independent toggle)
-    private int mTimerMinutes;             // 0 = no limit; >0 = daily watch limit
+    private int mTimerMinutes;             // 0 = no limit; >0 = watch limit per reset window
     private boolean mBlockShorts;
     private boolean mBlockRecommendations; // no "next video" at end + no suggestion rows
     private boolean mCalmExit;             // show warnings before limit expires
@@ -35,15 +52,17 @@ public class KidsModeData {
     private boolean mIsKioskEnabled;       // KIDS: kiosk mode (Lock Task) - child cannot leave the app
     private String mHiddenPins;            // KIDS F4: snapshot of parent pins hidden while Kids Mode is on ("id|title" entries)
     private List<String> mHiddenPinsList = new ArrayList<>(); // KIDS F4: parsed view of mHiddenPins
-    private boolean mForceStopOnExpire;  // KIDS: stop the clip the moment the daily limit expires + stay on a PIN-locked black screen
+    private boolean mForceStopOnExpire;  // KIDS: stop the clip the moment the watch limit expires + stay on a PIN-locked black screen
     private boolean mKioskReleased;        // KIDS: parent left the app with the PIN — stays unlocked until it's opened again
     private boolean mRelockOnBoot;         // KIDS v1.7: should a real TV reboot re-arm kiosk? (default OFF = release survives)
     private boolean mLockAtVideoEnd;       // KIDS v1.7.5: offer the "lock at end" playback mode (black screen + PIN when a clip ends)
+    private int mResetIntervalHours;       // KIDS v1.8: how often the quota resets (hours, see RESET_INTERVAL_HOURS)
+    private int mWarnBeforeMinutes;        // KIDS v1.8: show the countdown badge this many minutes before the limit (0 = off)
 
-    // Daily counters (persisted so they survive app restarts)
-    private String mDailyDate;             // yyyy-MM-dd of the counters
-    private long mDailyUsedMs;             // watch time accumulated today
-    private long mDailyBonusMs;            // extra minutes granted by parent today
+    // Quota counters (persisted so they survive app restarts)
+    private long mWindowStartMs;           // epoch ms when the current reset window began
+    private long mUsedMs;                  // watch time accumulated in the current window
+    private long mBonusMs;                 // extra minutes granted by the parent in this window
 
     private KidsModeData(Context context) {
         mAppPrefs = AppPrefs.instance(context);
@@ -104,6 +123,47 @@ public class KidsModeData {
 
     public void setTimerMinutes(int minutes) {
         mTimerMinutes = minutes;
+        persistData();
+    }
+
+    // --- Reset interval (KIDS v1.8) ---
+
+    /**
+     * KIDS v1.8: how often the watch quota resets, in hours. The parent picks one of
+     * {@link #RESET_INTERVAL_HOURS}; anything else (e.g. a hand-edited blob) is returned
+     * as stored so the caller can decide. The window itself is anchored at
+     * {@link #getWindowStartMs()} and rolled over by KidsModeController, never here.
+     */
+    public int getResetIntervalHours() {
+        return mResetIntervalHours;
+    }
+
+    public void setResetIntervalHours(int hours) {
+        if (mResetIntervalHours == hours) {
+            return;
+        }
+
+        mResetIntervalHours = hours;
+        persistData();
+    }
+
+    // --- Countdown warning (KIDS v1.8) ---
+
+    /**
+     * KIDS v1.8: minutes before the limit at which the top-right countdown appears.
+     * 0 = never show it. The badge is purely informational: it does not gate keys and
+     * never replaces the calm-exit warnings.
+     */
+    public int getWarnBeforeMinutes() {
+        return mWarnBeforeMinutes;
+    }
+
+    public void setWarnBeforeMinutes(int minutes) {
+        if (mWarnBeforeMinutes == minutes) {
+            return;
+        }
+
+        mWarnBeforeMinutes = minutes;
         persistData();
     }
 
@@ -376,37 +436,56 @@ public class KidsModeData {
         persistData();
     }
 
-    // --- Daily counters ---
+    // --- Quota counters (KIDS v1.8: reset-window based, no longer "daily") ---
 
-    public String getDailyDate() {
-        return mDailyDate;
+    /**
+     * Epoch ms of the boundary the counters below belong to.
+     *
+     * Stored at blob index 6, which older builds wrote as a yyyy-MM-dd day key: such a
+     * value parses as 0, i.e. "no window yet", so an upgraded install simply starts a
+     * fresh window on its first tick instead of migrating anything.
+     */
+    public long getWindowStartMs() {
+        return mWindowStartMs;
     }
 
-    public void setDailyDate(String date) {
-        mDailyDate = date;
+    public void setWindowStartMs(long windowStartMs) {
+        mWindowStartMs = windowStartMs;
         persistData();
     }
 
-    public long getDailyUsedMs() {
-        return mDailyUsedMs;
-    }
-
-    public void setDailyUsedMs(long ms) {
-        mDailyUsedMs = ms;
+    /**
+     * KIDS v1.8: roll the counters over to a new window in ONE persisted write — the
+     * rollover runs on a schedule, and three separate setters would be three synchronous
+     * file writes every time.
+     */
+    public void resetWindow(long windowStartMs) {
+        mWindowStartMs = windowStartMs;
+        mUsedMs = 0;
+        mBonusMs = 0;
         persistData();
     }
 
-    public void addDailyUsedMs(long deltaMs) {
-        mDailyUsedMs += deltaMs;
+    public long getUsedMs() {
+        return mUsedMs;
+    }
+
+    public void setUsedMs(long ms) {
+        mUsedMs = ms;
         persistData();
     }
 
-    public long getDailyBonusMs() {
-        return mDailyBonusMs;
+    public void addUsedMs(long deltaMs) {
+        mUsedMs += deltaMs;
+        persistData();
     }
 
-    public void setDailyBonusMs(long ms) {
-        mDailyBonusMs = ms;
+    public long getBonusMs() {
+        return mBonusMs;
+    }
+
+    public void setBonusMs(long ms) {
+        mBonusMs = ms;
         persistData();
     }
 
@@ -422,9 +501,12 @@ public class KidsModeData {
         mBlockShorts          = Helpers.parseBoolean(split, 3, true);  // default ON
         mBlockRecommendations = Helpers.parseBoolean(split, 4, true);  // default ON
         mCalmExit             = Helpers.parseBoolean(split, 5, true);  // default ON
-        mDailyDate            = Helpers.parseStr(split, 6);
-        mDailyUsedMs          = Helpers.parseLong(split, 7, 0);
-        mDailyBonusMs         = Helpers.parseLong(split, 8, 0);
+        // Index 6 was the yyyy-MM-dd day key in every earlier build; it is the epoch-ms start
+        // of the current reset window now. An old blob yields 0 here (parseLong falls back on
+        // a non-numeric string) = "no window yet", which expires on the first tick.
+        mWindowStartMs        = Helpers.parseLong(split, 6, 0);
+        mUsedMs               = Helpers.parseLong(split, 7, 0);
+        mBonusMs              = Helpers.parseLong(split, 8, 0);
         // Migration from v1.0: if a PIN exists but the flag was never stored, keep protection on
         mIsPinEnabled         = Helpers.parseBoolean(split, 9, mPin != null && !mPin.isEmpty());
         mBrightnessPercent    = Helpers.parseInt(split, 10, -1); // -1 = auto
@@ -440,15 +522,34 @@ public class KidsModeData {
         mKioskReleased        = Helpers.parseBoolean(split, 18, false); // KIDS: PIN exit release (default locked)
         mRelockOnBoot         = Helpers.parseBoolean(split, 19, false); // KIDS v1.7: reboot re-arms kiosk? (default: no)
         mLockAtVideoEnd       = Helpers.parseBoolean(split, 20, false); // KIDS v1.7.5: offer "lock at end"? (default: no)
+        mResetIntervalHours   = sanitize(split, 21, RESET_INTERVAL_HOURS, DEFAULT_RESET_INTERVAL_HOURS); // KIDS v1.8
+        mWarnBeforeMinutes    = sanitize(split, 22, WARN_BEFORE_MINUTES, DEFAULT_WARN_BEFORE_MINUTES);   // KIDS v1.8
+    }
+
+    /**
+     * KIDS v1.8: read one of the persisted multiple-choice settings, falling back to the
+     * default for an out-of-range index (a blob written before the setting existed) or for
+     * a value that is no longer offered.
+     */
+    private static int sanitize(String[] split, int index, int[] allowed, int fallback) {
+        int value = Helpers.parseInt(split, index, fallback);
+
+        for (int candidate : allowed) {
+            if (candidate == value) {
+                return value;
+            }
+        }
+
+        return fallback;
     }
 
     private void persistData() {
         mAppPrefs.setData(KIDS_MODE_DATA,
                 Helpers.mergeData(mIsEnabled, mPin, mTimerMinutes,
                         mBlockShorts, mBlockRecommendations, mCalmExit,
-                        mDailyDate, mDailyUsedMs, mDailyBonusMs, mIsPinEnabled, mBrightnessPercent,
+                        mWindowStartMs, mUsedMs, mBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
-                        mLockAtVideoEnd));
+                        mLockAtVideoEnd, mResetIntervalHours, mWarnBeforeMinutes));
     }
 }
