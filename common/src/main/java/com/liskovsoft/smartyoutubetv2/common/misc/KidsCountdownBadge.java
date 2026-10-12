@@ -21,10 +21,15 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 /**
  * KIDS v1.8: the remaining-time countdown in the top-right corner.
  *
- * Purely informational, and shown only while there is something to warn about: Kids Mode on,
- * a watch limit set, a parent-configured lead time (KidsModeData.getWarnBeforeMinutes) and
- * less than that much time left. It never gates keys, never blocks focus and never replaces
- * the calm-exit warnings — the PIN gate stays exactly as it was.
+ * KIDS v1.8.1: the badge is now shown on every screen for as long as there is time left —
+ * v1.8.0 kept it hidden until the last few (warn) minutes, so the timer was invisible for
+ * almost the whole session and looked simply broken ("the timer never appears"). The
+ * parent-configured lead time (KidsModeData.getWarnBeforeMinutes) is now the ALERT
+ * threshold: at or below it the badge turns red instead of white. "Off" (0) hides it.
+ *
+ * Purely informational: it never gates keys, never blocks focus and never replaces the
+ * calm-exit warnings — the PIN gate stays exactly as it was. It is shown only while Kids
+ * Mode is on and a watch limit is set (nothing to count otherwise).
  *
  * The number is not a timer of its own: it is computed from the same persisted quota the
  * hard stop enforces (KidsQuotaWindow + KidsModeData), plus the play time the counter has not
@@ -46,6 +51,7 @@ public class KidsCountdownBadge {
     private static final long REFRESH_MS = 1_000L;
     private static final int BACKGROUND_COLOR = 0xCC000000;
     private static final int TEXT_COLOR = 0xFFFFFFFF;
+    private static final int WARNING_TEXT_COLOR = 0xFFFF5252; // KIDS v1.8.1: red once the lead time is reached
     private static final float TEXT_SIZE_SP = 16f;
     private static final int PADDING_DP = 12;
     private static final int MARGIN_DP = 24;
@@ -84,8 +90,8 @@ public class KidsCountdownBadge {
     /**
      * One tick: decide from scratch whether the badge belongs on the given screen. Everything is
      * re-read every second on purpose — the parent may change the limit or the lead time, the
-     * remaining time crosses the threshold on its own, and the time-up lock must clear it. The
-     * one-second loop resolves the resumed activity itself, so a screen switch needs no re-arm.
+     * remaining time runs out on its own, and the time-up lock must clear it. The one-second
+     * loop resolves the resumed activity itself, so a screen switch needs no re-arm.
      */
     private static void refresh(Activity activity) {
         if (activity == null) {
@@ -110,8 +116,11 @@ public class KidsCountdownBadge {
             remainingMs = remainingMs(activity, data);
         }
 
+        // KIDS v1.8.1: visible while there is time left (not only inside the lead time), so
+        // the child/parent can always see how much is left; red once the lead time is reached.
         if (KidsQuotaWindow.shouldShowCountdown(remainingMs, warnMinutes)) {
-            show(activity, KidsQuotaWindow.formatCountdown(remainingMs));
+            show(activity, KidsQuotaWindow.formatCountdown(remainingMs),
+                    KidsQuotaWindow.isCountdownWarning(remainingMs, warnMinutes));
         } else {
             detach(activity);
         }
@@ -164,7 +173,7 @@ public class KidsCountdownBadge {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity.isInPictureInPictureMode();
     }
 
-    private static void show(Activity activity, CharSequence text) {
+    private static void show(Activity activity, CharSequence text, boolean warning) {
         TextView badge = findBadge(activity);
 
         if (badge == null) {
@@ -180,6 +189,8 @@ public class KidsCountdownBadge {
             Log.d(TAG, "Countdown badge shown (%s)", text);
         }
 
+        // KIDS v1.8.1: red inside the lead time, white outside it.
+        badge.setTextColor(warning ? WARNING_TEXT_COLOR : TEXT_COLOR);
         badge.setText(text);
     }
 

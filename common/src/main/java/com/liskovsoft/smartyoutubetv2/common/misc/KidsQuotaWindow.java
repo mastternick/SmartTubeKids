@@ -73,9 +73,21 @@ public final class KidsQuotaWindow {
     }
 
     /**
-     * Countdown badge: only while time is left AND no more than warnMinutes of it. 0 = off.
+     * Countdown badge: visible on every screen while there is time left. warnMinutes 0 = off.
+     *
+     * KIDS v1.8.1: the v1.8.0 rule (only within the last warnMinutes) made the badge invisible
+     * for almost the whole session, so the parent never saw a timer and reported it broken.
+     * The badge now shows the remaining time from the start; {@link #isCountdownWarning}
+     * decides when it turns red.
      */
     public static boolean shouldShowCountdown(long remainingMs, int warnMinutes) {
+        return warnMinutes > 0 && remainingMs > 0;
+    }
+
+    /**
+     * Countdown badge alert state: the last warnMinutes of the quota (the v1.8.0 show rule).
+     */
+    public static boolean isCountdownWarning(long remainingMs, int warnMinutes) {
         return warnMinutes > 0 && remainingMs > 0 && remainingMs <= warnMinutes * MINUTE_MS;
     }
 
