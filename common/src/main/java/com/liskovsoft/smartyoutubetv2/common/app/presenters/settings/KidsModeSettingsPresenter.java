@@ -19,6 +19,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.KidsSidebarManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager; // KIDS
+import com.liskovsoft.smartyoutubetv2.common.misc.MileMarkerOverlay; // KIDS v1.9
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
@@ -147,6 +148,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
+        appendMileMarkerSwitch(settingsPresenter);
         appendResetIntervalCategory(settingsPresenter); // KIDS v1.8: how often the watch limit resets
         appendCalmExitSwitch(settingsPresenter);
         appendCountdownWarningCategory(settingsPresenter); // KIDS v1.8: top-right remaining-time countdown
@@ -389,6 +391,14 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_reset_interval), options);
     }
 
+    private void appendMileMarkerSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_mile_marker_title),
+                getContext().getString(R.string.kids_mile_marker_desc),
+                option -> mKidsData.setUseMileMarker(option.isSelected()),
+                mKidsData.isUseMileMarker()));
+    }
+
     /**
      * KIDS v1.8: when the remaining-time countdown appears in the top-right corner. It is
      * purely informational — it never gates keys and never replaces the calm-exit warnings,
@@ -570,6 +580,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
      */
     private void setPinEnabled(boolean enabled) {
         mKidsData.setPinEnabled(enabled);
+        KidsPinGate.lock(); // an old parent session must not survive a protection change
         syncSettingsPassword();
     }
 
@@ -595,6 +606,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                         mKidsData.setPin(newValue.trim());
                     }
 
+                    KidsPinGate.lock(); // the new PIN must be typed to open the next protected area
                     syncSettingsPassword();
 
                     if (onDone != null) {
@@ -680,6 +692,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         if (getContext() instanceof Activity) {
             KidsScreenHelper.hideBlackScreen((Activity) getContext());
             KidsScreenHelper.clearPendingScreenOff();
+            MileMarkerOverlay.hide((Activity) getContext()); // v1.9: mile art has its own decor tag
         }
     }
 }

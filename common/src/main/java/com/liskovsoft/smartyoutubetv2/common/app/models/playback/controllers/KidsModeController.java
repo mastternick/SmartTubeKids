@@ -140,6 +140,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return;
         }
 
+        if (isTimeExpired() && isForceStopActive()) {
+            forceStopSession();
+            return;
+        }
+
         // KIDS: a new video woke us up - clear any calm-exit black screen state
         mIsCalmExitInProgress = false;
         Activity activity = getActivity();
@@ -305,7 +310,20 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         // Only while a clip is actually playing: paused/standby time isn't counted, so
         // there is no deadline to watch. No limit (timer = 0) = nothing can expire.
-        if (!isForceStopActive() || !isActive() || mLastPlayStartMs == 0) {
+        if (!isActive() || mLastPlayStartMs == 0) {
+            return;
+        }
+
+        if (!isForceStopActive()) {
+            // A time-up gate unlock suspends the hard stop only until it lapses: wake up exactly
+            // then (onTimerExpired re-checks everything and re-schedules), instead of waiting
+            // for the next ~1 min tickle.
+            long bypassMs = KidsTimeUpLock.getTimeUpBypassRemainingMs();
+
+            if (bypassMs > 0 && mKidsData.isForceStopOnExpire()) {
+                Utils.postDelayed(mExpireTask, bypassMs + 50);
+            }
+
             return;
         }
 
@@ -325,6 +343,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
     private void onTimerExpired() {
         if (!isActive()) {
+            return;
+        }
+
+        if (!isForceStopActive()) { // suspended or disabled meanwhile: re-plan instead of stopping
+            scheduleForceStop();
             return;
         }
 
@@ -351,6 +374,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         if (KidsTimeUpLock.isLocked()) {
             // Already cut and locked (e.g. another video was requested): keep the player down
+            if (getPlayer() != null && getPlayer().isEngineInitialized()) {
+                getPlayer().setPlayWhenReady(false);
+            }
             presenter.forceFinish();
             return;
         }
@@ -372,19 +398,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         final Activity activity = getActivity();
 
-        Runnable lockAndFinish = () -> {
-            // Cover the screen, then leave the player: the resumed browse activity comes
-            // up covered too (KidsTimeUpLock.applyOnResume in MotherActivity), so the
-            // playlist is never visible and no key press escapes the gate.
-            KidsTimeUpLock.arm(activity);
-            presenter.forceFinish();
-        };
-
+        // KIDS force stop: cut the clip NOW, arm the screen immediately, and firmly finish the player
         if (activity != null) {
-            KidsScreenHelper.fadeToBlack(activity, lockAndFinish);
-        } else {
-            lockAndFinish.run();
+            KidsTimeUpLock.arm(activity, mKidsData.isUseMileMarker());
         }
+        presenter.forceFinish();
     }
 
     /**

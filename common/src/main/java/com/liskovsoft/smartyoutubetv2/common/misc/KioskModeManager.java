@@ -112,6 +112,7 @@ public class KioskModeManager {
     private static boolean sLockRequestedInProcess; // fallback for API 21-22 (no public lock task query API)
     private static int sDoPoliciesState = DO_STATE_UNKNOWN;
     private static long sExitGraceUntilMs; // KIDS v1.2.8: PIN-approved exit window
+    private static long sSetupGraceUntilMs; // KIDS: key-guard setup window (distinct from PIN exit)
     private static long sLastLockOnKeyMs; // KIDS v1.2.8: throttle for ensureLockOnKeyPress
     private static WeakReference<Activity> sPinnedActivity; // KIDS v1.2.8: the task we pinned ourselves
     private static boolean sKeyGuardHintShown; // KIDS v1.6: one key-guard hint per process
@@ -409,6 +410,7 @@ public class KioskModeManager {
             sParentExitInProgress = false; // KIDS v1.7.1: no exit pending either
             sKeyGuardSetupPending = false; // KIDS v1.7.2: no setup result to report once kiosk is off
             sKeyGuardSetupLeftApp = false;
+            sSetupGraceUntilMs = 0; // the setup window is pointless once kiosk is off
             setReleasedByParent(activity, false); // KIDS v1.7: nothing to bypass once kiosk is off
             stopWatchdog(activity); // KIDS v1.4: switch OFF removes the guardian immediately
         } catch (Throwable e) {
@@ -453,6 +455,15 @@ public class KioskModeManager {
                 if (isDeviceOwner(activity)) {
                     applyDeviceOwnerPolicies(activity);
                 }
+
+                // Confirmed return from the setup trip with the guard bound: the setup window has
+                // done its job — end ONLY that (a PIN-exit window, if any, is a different deadline).
+                if (sKeyGuardSetupPending && sKeyGuardSetupLeftApp && isKeyGuardEnabled(activity)) {
+                    sKeyGuardSetupPending = false;
+                    sKeyGuardSetupLeftApp = false;
+                    sSetupGraceUntilMs = 0; // Setup return: end setup grace specifically, preserving any exit grace
+                }
+
                 autoLockIfNeeded(activity); // KIDS v1.2.8: also without DO = screen pinning (HOME blocked); cross-task fixed by releaseForNavigation()
                 hintKeyGuardIfNeeded(activity); // KIDS v1.6: point the parent to the full block
                 checkKeyGuardSetupResult(activity); // KIDS v1.7.2: back from the Accessibility screen — did the toggle stick?
@@ -491,7 +502,7 @@ public class KioskModeManager {
                 sKeyGuardSetupLeftApp = true;
             }
 
-            if (Build.VERSION.SDK_INT < 21 || System.currentTimeMillis() < sExitGraceUntilMs
+            if (Build.VERSION.SDK_INT < 21 || isInExitGrace()
                     || isReleasedByParent(activity)
                     || !isKioskEnabled(activity)
                     || isDeviceOwner(activity) || isTransientTask(activity)) {
@@ -509,7 +520,7 @@ public class KioskModeManager {
 
             Utils.postDelayed(() -> {
                 try {
-                    if (System.currentTimeMillis() < sExitGraceUntilMs // KIDS v1.2.8: parent is leaving on purpose
+                    if (isInExitGrace() // KIDS v1.2.8: parent is leaving on purpose
                             || isReleasedByParent(context) // KIDS v1.7: durable PIN-exit release
                             || !isKioskEnabled(context) // parent turned it off meanwhile
                             || Utils.isAppInForegroundFixed() // normal in-app navigation
@@ -632,7 +643,7 @@ public class KioskModeManager {
     public static void ensureLockOnKeyPress(Activity activity) {
         try {
             if (Build.VERSION.SDK_INT < 21 || !isKioskEnabled(activity)
-                    || System.currentTimeMillis() < sExitGraceUntilMs
+                    || isInExitGrace()
                     || isReleasedByParent(activity)
                     || isLockTaskActive(activity)) {
                 return;
@@ -659,7 +670,8 @@ public class KioskModeManager {
      * which is what actually holds after the exit kills the process.
      */
     public static boolean isInExitGrace() {
-        return System.currentTimeMillis() < sExitGraceUntilMs;
+        return System.currentTimeMillis() < sExitGraceUntilMs
+                || System.currentTimeMillis() < sSetupGraceUntilMs;
     }
 
     /**
@@ -802,7 +814,7 @@ public class KioskModeManager {
      * App info / Accessibility — the parent would be dragged out mid-flow.
      */
     private static void renewKeyGuardSetupWindow(Activity activity) {
-        sExitGraceUntilMs = System.currentTimeMillis() + SETUP_GRACE_MS;
+        sSetupGraceUntilMs = System.currentTimeMillis() + SETUP_GRACE_MS;
         releaseForNavigation(activity);
         stopWatchdog(activity);
     }
@@ -830,12 +842,6 @@ public class KioskModeManager {
     private static void checkKeyGuardSetupResult(Activity activity) {
         try {
             if (!sKeyGuardSetupPending) {
-                return;
-            }
-
-            if (isKeyGuardEnabled(activity)) { // the toggle stuck — nothing to report
-                sKeyGuardSetupPending = false;
-                sKeyGuardSetupLeftApp = false;
                 return;
             }
 
@@ -944,7 +950,7 @@ public class KioskModeManager {
         // KIDS v1.2.8: the parent just approved an exit with the PIN — don't re-pin.
         // KIDS v1.7: the persisted release covers the same case in a fresh process
         // (the exit kills it, so the in-memory window above is already gone there).
-        if (System.currentTimeMillis() < sExitGraceUntilMs || isReleasedByParent(activity)) {
+        if (isInExitGrace() || isReleasedByParent(activity)) {
             return;
         }
 

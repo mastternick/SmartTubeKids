@@ -20,6 +20,7 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.track.MediaTrack;
 import com.liskovsoft.smartyoutubetv2.common.prefs.AppPrefs.ProfileChangeListener;
 import com.liskovsoft.smartyoutubetv2.common.prefs.common.DataChangeBase;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 
 import java.util.ArrayList;
@@ -253,6 +254,12 @@ public class PlayerData extends DataChangeBase implements PlayerConstants, Profi
     }
 
     public void setPlaybackMode(int mode) {
+        if (mode != mPlaybackMode
+                && (mode == PLAYBACK_MODE_LOCK_AT_END || mPlaybackMode == PLAYBACK_MODE_LOCK_AT_END)) {
+            // An earlier gate PIN must not carry over to a freshly (re)selected/deselected Lock at end.
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
+
         mPlaybackMode = mode;
         persistState();
     }

@@ -106,16 +106,18 @@ Notes / troubleshooting:
    there (on Android 13+ side-loaded apps may need App info → ⋮ → *Allow
    restricted settings* first), then press BACK — the app returns by itself (a
    5-minute grace window keeps the guardian quiet during setup). The guard is
-   inert whenever kiosk is OFF, so it can stay enabled forever. ADB alternative:
+   inert whenever kiosk is OFF, so it can stay enabled forever. ADB alternative
+   (on Android 13+: grant the restricted-settings app-op first, then add the key
+   guard without overwriting other enabled accessibility services):
    ```bash
-   adb shell settings put secure enabled_accessibility_services app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService
-   adb shell settings put secure accessibility_enabled 1
+   PKG="app.smarttubekids" # or "app.smarttubekids.stable" / "app.smarttubekids.fdroid"
+   adb shell appops set "$PKG" ACCESS_RESTRICTED_SETTINGS allow
+   adb shell "cur=\$(settings get secure enabled_accessibility_services) && target='$PKG/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService' && case \":\$cur:\" in *:\$target:*) val=\"\$cur\";; '::'|':null:') val=\"\$target\";; *) val=\"\$cur:\$target\";; esac && settings put secure enabled_accessibility_services \"\$val\" && settings put secure accessibility_enabled 1"
    ```
-   (other flavors: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`. The
-   value replaces the whole enabled-services list, so read it first — `adb shell
-   settings get secure enabled_accessibility_services` — and, if it already lists
-   something, append with a colon (`existing:app.smarttubekids/…KioskKeyGuardService`)
-   instead of overwriting it.)
+   (other flavors: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`.
+   Alternatively, read `settings get secure enabled_accessibility_services` first:
+   if empty/null, set the target directly; if other services already exist, append
+   with a colon `:app.smarttubekids/...` instead of overwriting.)
 
    > **The assistant button itself is a separate case (platform limit).**
    > `KEYCODE_ASSIST` / `KEYCODE_VOICE_ASSIST` are handled in
@@ -184,15 +186,22 @@ exit — with kiosk OFF every key passes through by design. If HOME still reache
 the launcher, check the three failure modes in order:
 
 > **First, the switch that ticks itself off (Android 13+).** If the accessibility
-> toggle checks itself and then reverts, the platform's *restricted settings*
-> protection is blocking a side-loaded app: accessibility services cannot be
-> enabled until the user explicitly allows it. The app (v1.7.2) detects the failed
-> setup trip and shows a dialog with both shortcuts. Manual fix: **App info →
-> ⋮ → *Allow restricted settings*** (⋮ is the overflow menu, top-right of the App
-> info screen), then tick the guard again. No such menu on your build? Install or
-> update the APK over ADB (`adb install -r app.apk`) — ADB-installed apps are
-> exempt — or write the service straight into the secure setting with the
-> `settings put` commands above (that path bypasses the Settings UI gate).
+> toggle checks itself and then reverts, platform restricted settings may be
+> preventing the sideloaded service from activating. The app cannot automatically
+> reactivate the service on its own — user confirmation or ADB permissions are
+> required. Manual fix: **App info → ⋮ → *Allow restricted settings*** (⋮ is the
+> overflow menu, top-right of the App info screen), then tick the guard again.
+> If that menu is absent on your build, grant the restriction app-op over ADB
+> and add the service without replacing other accessibility services:
+> ```bash
+> PKG="app.smarttubekids" # or "app.smarttubekids.stable" / "app.smarttubekids.fdroid"
+> # check current status (typically "ACCESS_RESTRICTED_SETTINGS: deny"):
+> adb shell appops get "$PKG" | grep -i restrict
+> # grant the app-op (name is CASE-SENSITIVE):
+> adb shell appops set "$PKG" ACCESS_RESTRICTED_SETTINGS allow
+> # add the key guard preserving existing services:
+> adb shell "cur=\$(settings get secure enabled_accessibility_services) && target='$PKG/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService' && case \":\$cur:\" in *:\$target:*) val=\"\$cur\";; '::'|':null:') val=\"\$target\";; *) val=\"\$cur:\$target\";; esac && settings put secure enabled_accessibility_services \"\$val\" && settings put secure accessibility_enabled 1"
+> ```
 
 1. **Not enabled** — the service must be listed by the system:
    ```bash
@@ -208,6 +217,15 @@ the launcher, check the three failure modes in order:
    ```bash
    adb logcat -s KioskKeyGuardService
    ```
+   Press HOME **on the remote** — `input keyevent` is NOT a valid test: keys injected
+   over ADB enter at the dispatcher and skip the accessibility input filter, so the
+   launcher opens with no `swallowed key` line even on a perfectly healthy guard.
+   Also check that no setup grace is running: turning the kiosk switch on without the
+   guard enabled (and the "Open App info" / "Open Accessibility again" shortcuts of the
+   revert dialog) arms a 5-minute window in which every key passes through by design
+   (the guard early-returns silently — again no log). The window ends early once the
+   app is back from the Accessibility screen with the guard enabled. The verdict below
+   is only valid with a real remote press and no grace.
    If it logs `Kiosk key guard: swallowed key 3` while the launcher still opens, the
    vendor build bypasses accessibility key filtering → fall back to the Device Owner
    setup (Option A), which blocks HOME/RECENTS in the window manager itself.
@@ -230,6 +248,47 @@ adb logcat -s KioskKeyGuardService
   adb shell pm disable-user --user 0 <assistant pkg>
   ```
   (or use the Device Owner setup, whose Lock Task refuses the assistant's start).
+
+## Mile Marker Mode (KIDS v1.9)
+
+When the parent enables **Mile Marker Mode** in Kids Mode settings, the time-up
+black screen (force stop path) is replaced by a night-road scene drawn on the
+activity decor (`MileMarkerOverlay`): a dark road with ten **numbered markers
+(1–10)**, each flanked by street-light poles. Nothing about the gate changes —
+keys are still swallowed, the PIN dialog still needs 10 escape presses in 10 s,
+release still happens only through the PIN or the quota window actually
+rolling over (`resetWindow` → `releaseStateOnly`). The overlay NEVER releases
+the lock by itself.
+
+Load-bearing rules (do not "simplify" them away):
+
+- **The lamps show REAL window progress, not a demo animation.** Each 1 s tick
+  recomputes `lit = elapsed · 10 / intervalMs` from the persisted
+  `windowStartMs` / `resetIntervalHours` (`KidsQuotaWindow.intervalMs`). Stateless
+  by design: a process death or re-arm inherits nothing, and opening the scene
+  after the window already rolled shows all lamps lit without re-firing the
+  green celebration.
+- **Art is frozen at arm time.** `KidsTimeUpLock.arm(activity, useMileMarker)`
+  stores the choice in `sMileMarkerShown` (in-memory, next to `sLocked`); every
+  re-cover path (`applyOnResume`, `onKeyPress`, the dialog-dismiss callback)
+  routes through `cover()`, so a settings change mid-lock cannot swap the art
+  under the child. The "Lock at end" mode deliberately keeps the classic black
+  screen — only the timer path passes the pref.
+- **Separate decor tag.** The scene is tagged `mile_marker_overlay`, NOT the
+  black screen's `kids_screen_off_overlay`. Anything that checks for a visible
+  time-up cover must look for BOTH — that is why the countdown badge also
+  suppresses on `MileMarkerOverlay.isShown()`, and why
+  `refreshAfterExtend()` calls `MileMarkerOverlay.hide()` next to
+  `hideBlackScreen()` (the extend path releases STATE only, so the view cleanup
+  must be explicit there).
+- `show()` is idempotent per host (tag check + `removeCallbacks(sTick)` before
+  reposting) — it is called from both `arm` and `applyOnResume`.
+- Suppressed in PIP; restores the configured brightness (the scene is useless
+  at the black screen's MIN_BRIGHTNESS).
+
+The same release expands the reset-interval options to
+**1/2/3/4/5/6/8/10/12/24 h** (`KidsModeData.RESET_INTERVAL_HOURS`; anything
+outside the set still sanitizes back to 24).
 
 ## Exiting kiosk
 
@@ -268,16 +327,18 @@ repornirea TV-ului. Dezactivarea se face din
   manual pot cere întâi App info → ⋮ → *Allow restricted settings*). Apoi apasă
   BACK — aplicația revine singură (fereastra de grație de 5 minute ține paznicul
   liniștit în timpul configurării). Paznicul nu face nimic când kiosk e oprit, deci
-  poate rămâne activat permanent. Alternativă ADB:
+  poate rămâne activat permanent. Alternativă ADB (pe Android 13+: acordă
+  app-op-ul de restricted settings, apoi adaugă serviciul fără a suprascrie
+  alte servicii de accesibilitate existente):
   ```bash
-  adb shell settings put secure enabled_accessibility_services app.smarttubekids/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService
-  adb shell settings put secure accessibility_enabled 1
+  PKG="app.smarttubekids" # sau "app.smarttubekids.stable" / "app.smarttubekids.fdroid"
+  adb shell appops set "$PKG" ACCESS_RESTRICTED_SETTINGS allow
+  adb shell "cur=\$(settings get secure enabled_accessibility_services) && target='$PKG/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService' && case \":\$cur:\" in *:\$target:*) val=\"\$cur\";; '::'|':null:') val=\"\$target\";; *) val=\"\$cur:\$target\";; esac && settings put secure enabled_accessibility_services \"\$val\" && settings put secure accessibility_enabled 1"
   ```
-  (alte variante: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`; comanda
-  înlocuiește întreaga listă de servicii active — citește-o întâi cu `adb shell
-  settings get secure enabled_accessibility_services` și, dacă are deja ceva,
-  adaugă cu două puncte (`existente:app.smarttubekids/…KioskKeyGuardService`) în loc
-  să suprascrii.)
+  (alte variante: `app.smarttubekids.stable` / `app.smarttubekids.fdroid`.
+  Alternativ, citește întâi cu `adb shell settings get secure enabled_accessibility_services`:
+  dacă e gol sau null, setează ținta direct; dacă există deja alte servicii, adaugă
+  la sfârșit cu două puncte `:app.smarttubekids/...` în loc să suprascrii.)
 - **Recomandat (blocare totală, cu ADB):** conectează TV-ul prin ADB din rețea și
   rulează, imediat după instalare și **înainte** de a deschide aplicația:
   ```bash
@@ -327,22 +388,36 @@ ieșiri aprobate) — cu kiosk oprit, toate tastele trec, prin design. Dacă HOM
 deschide launcherul, verifică în ordine:
 
 > **Întâi, comutatorul care se debifează singur (Android 13+).** Dacă bifa de la
-> Accesibilitate se pune singură și apoi revine, te blochează protecția
-> *restricted settings* a platformei: serviciile de accesibilitate nu pot fi
-> activate pentru o aplicație instalată manual până nu le permite utilizatorul
-> explicit. Aplicația (v1.7.2) detectează ieșirea nereușită și afișează un dialog
-> cu ambele scurtături. Remediere manuală: **App info → ⋮ → *Allow restricted
-> settings*** (⋮ este meniul din colțul dreapta-sus al ecranului App info), apoi
-> bifează din nou paznicul. Nu există acest meniu pe build-ul tău?
-> Instalează/actualizează APK-ul prin ADB (`adb install -r app.apk`) — aplicațiile
-> instalate prin ADB sunt exceptate — sau scrie serviciul direct în setarea
-> securizată cu comenzile `settings put` de mai sus (acea cale ocolește poarta din
-> interfața Setărilor).
+> Accesibilitate se pune singură și apoi revine, setările restricționate ale
+> platformei pot bloca serviciul instalat manual. Aplicația nu se poate reactiva
+> automat — este necesară permisiunea utilizatorului sau configurarea prin ADB.
+> Remediere manuală: **App info → ⋮ → *Allow restricted settings*** (⋮ este
+> meniul din colțul dreapta-sus al ecranului App info), apoi bifează din nou
+> paznicul. Nu există acest meniu pe build-ul tău? Deblochează app-op-ul prin ADB
+> și adaugă serviciul păstrând celelalte servicii active:
+> ```bash
+> PKG="app.smarttubekids" # sau "app.smarttubekids.stable" / "app.smarttubekids.fdroid"
+> # verifică starea curentă (de regulă "ACCESS_RESTRICTED_SETTINGS: deny"):
+> adb shell appops get "$PKG" | grep -i restrict
+> # deblochează op-ul (numele este CASE-SENSITIVE):
+> adb shell appops set "$PKG" ACCESS_RESTRICTED_SETTINGS allow
+> # adaugă paznicul fără a suprascrie alte servicii existente:
+> adb shell "cur=\$(settings get secure enabled_accessibility_services) && target='$PKG/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService' && case \":\$cur:\" in *:\$target:*) val=\"\$cur\";; '::'|':null:') val=\"\$target\";; *) val=\"\$cur:\$target\";; esac && settings put secure enabled_accessibility_services \"\$val\" && settings put secure accessibility_enabled 1"
+> ```
 
 1. **Nu e activat:** `adb shell settings get secure enabled_accessibility_services`
    trebuie să conțină `app.smarttubekids/...KioskKeyGuardService`.
 2. **Activat dar nelegat de sistem:** `adb shell dumpsys accessibility | grep -A5 KioskKeyGuardService`.
-3. **Legat, dar ROM-ul ignoră filtrul:** `adb logcat -s KioskKeyGuardService` — dacă
+3. **Legat, dar ROM-ul ignoră filtrul:** `adb logcat -s KioskKeyGuardService`.
+   Apasă HOME **de pe telecomandă** — `input keyevent` NU e un test valid: tastele
+   injectate prin ADB intră direct în dispatcher și ocolesc filtrul de accesibilitate,
+   așa că launcherul se deschide fără nicio linie `swallowed key` chiar și cu un
+   paznic perfect sănătos. Verifică și că nu rulează fereastra de grație: pornirea
+   comutatorului kiosk fără paznic activat (și scurtăturile „Open App info" / „Deschide
+   din nou Accesibilitatea" din dialogul de revenire) armează 5 minute în care toate
+   tastele trec prin design (paznicul iese silențios, tot fără log). Fereastra se
+   încheie mai devreme când aplicația revine din Accesibilitate cu paznicul activat.
+   Verdictul de mai jos e valid doar cu apăsare reală și fără grație. Dacă
    scrie „swallowed key 3" iar launcherul tot se deschide, build-ul vendor nu aplică
    filtrarea de taste de accesibilitate → folosește Device Owner (Opțiunea A), care
    blochează HOME/RECENTS direct în window manager.

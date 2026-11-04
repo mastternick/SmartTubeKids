@@ -3,6 +3,7 @@ package com.liskovsoft.smartyoutubetv2.common.prefs;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import com.liskovsoft.sharedutils.helpers.Helpers;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +27,7 @@ public class KidsModeData {
     public static final int DEFAULT_WARN_BEFORE_MINUTES = 5;
 
     /** KIDS v1.8: reset-window lengths the parent can choose from (hours). */
-    public static final int[] RESET_INTERVAL_HOURS = {1, 3, 6, 8, 12, 24};
+    public static final int[] RESET_INTERVAL_HOURS = {1, 2, 3, 4, 5, 6, 8, 10, 12, 24};
 
     /** KIDS v1.8: countdown lead times the parent can choose from (minutes, 0 = off). */
     public static final int[] WARN_BEFORE_MINUTES = {0, 1, 2, 3, 5, 10, 15, 30};
@@ -58,6 +59,7 @@ public class KidsModeData {
     private boolean mLockAtVideoEnd;       // KIDS v1.7.5: offer the "lock at end" playback mode (black screen + PIN when a clip ends)
     private int mResetIntervalHours;       // KIDS v1.8: how often the quota resets (hours, see RESET_INTERVAL_HOURS)
     private int mWarnBeforeMinutes;        // KIDS v1.8: show the countdown badge this many minutes before the limit (0 = off)
+    private boolean mUseMileMarker;
 
     // Quota counters (persisted so they survive app restarts)
     private long mWindowStartMs;           // epoch ms when the current reset window began
@@ -83,6 +85,9 @@ public class KidsModeData {
     }
 
     public void setEnabled(boolean enabled) {
+        if (mIsEnabled != enabled) {
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
         mIsEnabled = enabled;
         persistData();
     }
@@ -94,6 +99,9 @@ public class KidsModeData {
     }
 
     public void setPin(String pin) {
+        if (mPin == null ? pin != null : !mPin.equals(pin)) {
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
         mPin = pin;
         persistData();
     }
@@ -111,6 +119,9 @@ public class KidsModeData {
     }
 
     public void setPinEnabled(boolean enabled) {
+        if (mIsPinEnabled != enabled) {
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
         mIsPinEnabled = enabled;
         persistData();
     }
@@ -123,6 +134,20 @@ public class KidsModeData {
 
     public void setTimerMinutes(int minutes) {
         mTimerMinutes = minutes;
+        persistData();
+    }
+
+    // --- Mile Marker Mode ---
+
+    public boolean isUseMileMarker() {
+        return mUseMileMarker;
+    }
+
+    public void setUseMileMarker(boolean useMileMarker) {
+        if (mUseMileMarker != useMileMarker) {
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
+        mUseMileMarker = useMileMarker;
         persistData();
     }
 
@@ -221,6 +246,9 @@ public class KidsModeData {
     }
 
     public void setForceStopOnExpire(boolean forceStop) {
+        if (mForceStopOnExpire != forceStop) {
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
         mForceStopOnExpire = forceStop;
         persistData();
     }
@@ -415,6 +443,8 @@ public class KidsModeData {
             return;
         }
 
+        KidsTimeUpLock.invalidateGateAuthorization();
+
         mLockAtVideoEnd = lock;
         persistData();
     }
@@ -524,6 +554,7 @@ public class KidsModeData {
         mLockAtVideoEnd       = Helpers.parseBoolean(split, 20, false); // KIDS v1.7.5: offer "lock at end"? (default: no)
         mResetIntervalHours   = sanitize(split, 21, RESET_INTERVAL_HOURS, DEFAULT_RESET_INTERVAL_HOURS); // KIDS v1.8
         mWarnBeforeMinutes    = sanitize(split, 22, WARN_BEFORE_MINUTES, DEFAULT_WARN_BEFORE_MINUTES);   // KIDS v1.8
+        mUseMileMarker        = Helpers.parseBoolean(split, 23, false);
     }
 
     /**
@@ -550,6 +581,6 @@ public class KidsModeData {
                         mWindowStartMs, mUsedMs, mBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
-                        mLockAtVideoEnd, mResetIntervalHours, mWarnBeforeMinutes));
+                        mLockAtVideoEnd, mResetIntervalHours, mWarnBeforeMinutes, mUseMileMarker));
     }
 }

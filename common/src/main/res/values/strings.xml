@@ -770,6 +770,8 @@
     <string name="kids_timer_off">No limit</string>
     <!-- KIDS v1.8: quota reset window + remaining-time countdown -->
     <string name="kids_reset_interval">Reset interval</string>
+    <string name="kids_mile_marker_title">Mile Marker Mode</string>
+    <string name="kids_mile_marker_desc">When time is up, show a colorful road instead of a black screen. The child watches the countdown lights and waits for the reset.</string>
     <string name="kids_countdown_warning">Remaining-time countdown</string>
     <string name="kids_countdown_off">Off</string>
     <string name="kids_calm_exit">Calm exit warnings</string>
@@ -781,6 +783,7 @@
     <string name="kids_lock_at_video_end">Lock the screen when a clip ends</string>
     <string name="kids_lock_at_video_end_desc">Adds a Lock at end entry to the player playback-mode list. While that mode is selected, a clip that reaches its end stops on a black screen and stays silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times within 10 seconds — only then does the Kids Mode PIN dialog appear, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
     <string name="kids_lock_at_video_end_needs_pin">The end-of-video lock needs a PIN to unlock the black screen. Set one now.</string>
+    <string name="kids_mile_marker_done">Reset complete!</string>
     <string name="kids_pin">PIN protection</string>
     <string name="kids_pin_enable">Enable PIN</string>
     <string name="kids_pin_enable_desc">Protect Kids Mode and all Settings with a PIN. Disabling takes effect immediately.</string>
@@ -818,7 +821,7 @@
     <string name="kids_kiosk_key_guard_failed">Could not open Accessibility settings. Open Settings → Accessibility manually and enable "SmartTube Kids kiosk key guard".</string>
     <string name="kids_kiosk_key_guard_blocked_title">Kiosk key guard is not enabled</string>
     <string name="kids_kiosk_key_guard_blocked_why">Fix now: App info → \u22ee → Allow restricted settings</string>
-    <string name="kids_kiosk_key_guard_blocked_text">Android turned the switch back off on its own — that is the "restricted settings" protection from Android 13+: apps installed outside the Play Store cannot use Accessibility until the system allows it. Fix it once:\n1. Open App info (or Settings → Apps → SmartTube Kids).\n2. Open the \u22ee menu and choose "Allow restricted settings".\n3. Come back and enable "SmartTube Kids kiosk key guard" in Accessibility again.\nIf the TV has no such menu, install/update the app over ADB (adb install) or enable the service with the ADB command from KIOSK.md — those routes are not restricted. If the switch reverts again later (for example after an app update), repeat the App info step.</string>
+    <string name="kids_kiosk_key_guard_blocked_text">Android turned the switch back off on its own — restricted settings on Android 13+ may be preventing the sideloaded service from activating until allowed. The app cannot reactivate it automatically. To resolve it:\n1. Open App info (or Settings → Apps → SmartTube Kids).\n2. Open the \u22ee menu and choose "Allow restricted settings".\n3. Come back and enable "SmartTube Kids kiosk key guard" in Accessibility again.\nIf the TV has no such menu, use the app-op and ADB instructions in KIOSK.md to allow restricted settings and add the service without replacing other accessibility services. If the switch reverts again later (for example after an app update), repeat the App info step.</string>
     <string name="kids_kiosk_open_app_info">Open App info (Allow restricted settings)</string>
     <string name="kids_kiosk_retry_accessibility">Open Accessibility again</string>
     <string name="kids_kiosk_open_app_info_failed">Could not open App info. Open Settings → Apps → SmartTube Kids manually.</string>

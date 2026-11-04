@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.Typeface;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -49,19 +51,23 @@ public class KidsCountdownBadge {
     private static final String TAG = KidsCountdownBadge.class.getSimpleName();
     private static final String BADGE_TAG = "kids_countdown_badge";
     private static final long REFRESH_MS = 1_000L;
+    private static final long FAST_REFRESH_MS = 250L;
     private static final int BACKGROUND_COLOR = 0xCC000000;
     private static final int TEXT_COLOR = 0xFFFFFFFF;
     private static final int WARNING_TEXT_COLOR = 0xFFFF5252; // KIDS v1.8.1: red once the lead time is reached
-    private static final float TEXT_SIZE_SP = 16f;
-    private static final int PADDING_DP = 12;
+    private static final float TEXT_SIZE_SP = 22f; // KIDS: enlarged badge text
+    private static final int PADDING_DP = 16; // KIDS: enlarged padding
     private static final int MARGIN_DP = 24;
-    private static final int CORNER_RADIUS_DP = 8;
+    private static final int CORNER_RADIUS_DP = 10; // KIDS: enlarged corner radius
 
     private static final Runnable sRefresh = () -> refresh(MotherActivity.getResumedActivity());
 
     // Resolved once: PlaybackPresenter is a process-wide singleton and its KidsModeController is
     // created with it (see getUnflushedPlayMs — resolving it per tick would re-run setContext).
+    private static PlaybackPresenter sPresenter;
     private static KidsModeController sController;
+    private static ToneGenerator sToneGenerator;
+    private static int sLastBeepSecond = -1;
 
     private KidsCountdownBadge() {
     }
@@ -85,6 +91,7 @@ public class KidsCountdownBadge {
     public static void onPause(Activity activity) {
         detach(activity);
         Utils.removeCallbacks(sRefresh);
+        releaseToneGenerator();
     }
 
     /**
@@ -111,6 +118,7 @@ public class KidsCountdownBadge {
         // that screen. Keep ticking while hidden so the badge returns by itself.
         if (counting
                 && !KidsTimeUpLock.isLocked()
+                && !MileMarkerOverlay.isShown(activity) // v1.9: mile art has its own decor tag
                 && !KidsScreenHelper.isBlackScreenShown(activity)
                 && !isInPipMode(activity)) {
             remainingMs = remainingMs(activity, data);
@@ -121,12 +129,63 @@ public class KidsCountdownBadge {
         if (KidsQuotaWindow.shouldShowCountdown(remainingMs, warnMinutes)) {
             show(activity, KidsQuotaWindow.formatCountdown(remainingMs),
                     KidsQuotaWindow.isCountdownWarning(remainingMs, warnMinutes));
+            handleCountdownBeep(activity, remainingMs);
         } else {
             detach(activity);
+            releaseToneGenerator();
+            sLastBeepSecond = -1;
         }
 
         if (counting) {
-            Utils.postDelayed(sRefresh, REFRESH_MS); // keep ticking so it can appear on its own
+            long delay = (remainingMs > 0 && remainingMs <= 12_000L) ? FAST_REFRESH_MS : REFRESH_MS;
+            Utils.postDelayed(sRefresh, delay); // keep ticking so it can appear on its own
+        } else {
+            releaseToneGenerator();
+            sLastBeepSecond = -1;
+        }
+    }
+
+    private static synchronized void playCountdownBeep() {
+        try {
+            if (sToneGenerator == null) {
+                sToneGenerator = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
+            }
+            sToneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 80);
+        } catch (Throwable e) {
+            Log.e(TAG, "Failed to play countdown beep", e);
+            releaseToneGenerator();
+        }
+    }
+
+    private static synchronized void releaseToneGenerator() {
+        if (sToneGenerator != null) {
+            try {
+                sToneGenerator.release();
+            } catch (Throwable e) {
+                Log.e(TAG, "Failed to release ToneGenerator", e);
+            }
+            sToneGenerator = null;
+        }
+    }
+
+    private static void handleCountdownBeep(Activity activity, long remainingMs) {
+        if (remainingMs <= 0 || remainingMs > 10_000L) {
+            sLastBeepSecond = -1;
+            return;
+        }
+
+        int seconds = (int) ((remainingMs + 999) / 1000);
+
+        // Sound must ONLY play when playback is active:
+        // no sound when playback is paused or stopped, or on the browse screen.
+        PlaybackPresenter presenter = getPresenter(activity);
+        boolean isPlaying = presenter != null && presenter.isPlaying();
+
+        if (isPlaying && seconds >= 1 && seconds <= 10) {
+            if (seconds != sLastBeepSecond) {
+                sLastBeepSecond = seconds;
+                playCountdownBeep();
+            }
         }
     }
 
@@ -145,6 +204,14 @@ public class KidsCountdownBadge {
                 usedMs + getUnflushedPlayMs(activity));
     }
 
+    private static PlaybackPresenter getPresenter(Context context) {
+        if (sPresenter == null && context != null) {
+            sPresenter = PlaybackPresenter.instance(context);
+        }
+
+        return sPresenter;
+    }
+
     /**
      * Play time the quota counter has not persisted yet (0 while paused/not counting).
      *
@@ -156,7 +223,7 @@ public class KidsCountdownBadge {
      */
     private static long getUnflushedPlayMs(Context context) {
         if (sController == null) {
-            PlaybackPresenter presenter = PlaybackPresenter.instance(context);
+            PlaybackPresenter presenter = getPresenter(context);
             sController = presenter != null ? presenter.getController(KidsModeController.class) : null;
         }
 

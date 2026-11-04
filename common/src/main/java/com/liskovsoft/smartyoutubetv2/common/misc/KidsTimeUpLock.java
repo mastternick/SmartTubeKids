@@ -45,11 +45,55 @@ public class KidsTimeUpLock {
     // SimpleEditDialog), a permanent "shown" flag would trap the child on black with
     // no way to ever type the PIN.
     private static final long PIN_DIALOG_THROTTLE_MS = 30_000L;
+    private static final long GATE_SESSION_MS = 10 * 60_000L;
 
     private static boolean sLocked;
     private static long sPinDialogShownAtMs;
+    private static long sGateUnlockedUntilMs;
+    // The authorization was granted while the quota was exhausted (the time-up gate): only then
+    // does it also suspend the hard stop. A Lock-at-end unlock with quota left must not.
+    private static boolean sGateBypassesTimeUp;
+    // Armed-state flag: mile overlay vs classic black screen. Not the pref — a settings change mid-lock
+    // cannot swap the art under the child; next arm re-reads the pref.
+    private static boolean sMileMarkerShown;
 
     private KidsTimeUpLock() {
+    }
+
+    /**
+     * @return true when the parent explicitly unlocked a gate with a valid PIN.
+     *         Separated from the general settings session (KidsPinGate.isUnlocked()) so
+     *         configuring settings does not deactivate timer expiration.
+     */
+    public static boolean isGateUnlocked() {
+        return getGateAuthorizationRemainingMs() > 0;
+    }
+
+    private static long getGateAuthorizationRemainingMs() {
+        return Math.max(0, sGateUnlockedUntilMs - System.currentTimeMillis());
+    }
+
+    /**
+     * @return how long the hard stop stays suspended by a time-up gate unlock (0 = not suspended).
+     */
+    public static long getTimeUpBypassRemainingMs() {
+        return sGateBypassesTimeUp ? getGateAuthorizationRemainingMs() : 0;
+    }
+
+    /**
+     * Authorizes proceeding past a gate after a valid PIN was verified at the gate. When the
+     * quota is exhausted at that moment, the hard stop is suspended for the same window so the
+     * parent who just typed the PIN is not re-locked by the very next video.
+     */
+    public static void unlockGateSession(Context context) {
+        sGateUnlockedUntilMs = System.currentTimeMillis() + GATE_SESSION_MS;
+        sGateBypassesTimeUp = isQuotaExhausted(context);
+    }
+
+    /** Invalidate gate authorization when its protecting settings change. */
+    public static void invalidateGateAuthorization() {
+        sGateUnlockedUntilMs = 0;
+        sGateBypassesTimeUp = false;
     }
 
     /**
@@ -61,60 +105,74 @@ public class KidsTimeUpLock {
 
     /**
      * @return true when force stop is armed: Kids Mode on, the "stop immediately"
-     *         switch on, a PIN available to unlock the screen with, AND no active
-     *         parent session.
+     *         switch on, a PIN available to unlock the screen with, AND the hard stop is not
+     *         suspended by a time-up gate unlock.
      *
-     * Why the parent-session bypass: entering the correct PIN at the gate calls
-     * {@link KidsPinGate#unlock()}, which — exactly like everywhere else in the app
-     * (Settings, kiosk exit) — grants a short authenticated window. Without this bypass
-     * the very next video would re-lock immediately (the daily quota is still full),
-     * trapping even the parent who just typed the PIN. The parent's real controls to
-     * grant more watching are "+N min" (extend) or turning Kids Mode off.
-     *
-     * A child who doesn't know the PIN can never set that window, so the guarantee
-     * "expired → cannot leave the black screen without the PIN" still holds.
+     * Why the bypass: entering the correct PIN at the time-up gate (quota exhausted) grants a
+     * short authenticated window to leave the gate without an immediate PIN re-lock. It does
+     * NOT lift the quota: onNewVideo still ends playback with the calm exit while the quota is
+     * exhausted; the parent grants more time ("+N min") or turns the limit off. A gate unlock
+     * with quota left (Lock at end) does not suspend the hard stop. General parent settings
+     * sessions (KidsPinGate.isUnlocked()) never deactivate this check.
      */
     public static boolean isForceStopActive(Context context) {
-        return isKidsGateOpen(context) && KidsModeData.instance(context).isForceStopOnExpire();
+        return isKidsGateBase(context)
+                && KidsModeData.instance(context).isForceStopOnExpire()
+                && getTimeUpBypassRemainingMs() <= 0;
     }
 
     /**
      * KIDS v1.7.5: the end-of-video lock is armed — Kids Mode on, a PIN to unlock with,
-     * no open parent session, the parent offered the mode in Kids Mode
+     * no gate unlock in effect, the parent offered the mode in Kids Mode
      * ({@link KidsModeData#isLockAtVideoEnd}) AND it is the player's current playback
      * mode. The mode value alone is not enough: turning the Kids switch off must disarm
      * the lock even if the selection lingers in {@code PlayerData}.
      */
     public static boolean isLockAtEndActive(Context context) {
-        return isKidsGateOpen(context) && isLockAtEndModeSelected(context);
+        return isKidsGateBase(context) && !isGateUnlocked() && isLockAtEndModeSelected(context);
     }
 
     /**
      * KIDS: does the PIN gate apply at all right now? True when EITHER reason is armed —
-     * the daily-limit force stop ({@link #isForceStopActive}) or the end-of-video lock
+     * the quota force stop ({@link #isForceStopActive}) or the end-of-video lock
      * ({@link #isLockAtEndActive}).
      *
      * Used by the gate itself (releasing on the first key press when no reason is armed
-     * any more, so nobody is ever trapped). The timer path keeps calling
-     * {@link #isForceStopActive} so its semantics stay untouched.
+     * any more, so nobody is ever trapped).
      */
     public static boolean isGateActive(Context context) {
-        return isKidsGateOpen(context)
-                && (KidsModeData.instance(context).isForceStopOnExpire() || isLockAtEndModeSelected(context));
+        return isForceStopActive(context) || isLockAtEndActive(context);
     }
 
     /**
-     * KIDS: may a Kids-mode gate arm at all? Kids Mode on + a PIN to unlock with +
-     * no open parent session.
+     * KIDS: may a Kids-mode gate arm at all? Kids Mode on + a PIN to unlock with.
      */
-    private static boolean isKidsGateOpen(Context context) {
-        if (context == null || KidsPinGate.isUnlocked()) {
+    private static boolean isKidsGateBase(Context context) {
+        if (context == null) {
             return false;
         }
 
         KidsModeData data = KidsModeData.instance(context);
 
         return data.isEnabled() && data.isPinEnabled();
+    }
+
+    /** Persisted quota is used up (a window that already moved on counts as fresh). */
+    private static boolean isQuotaExhausted(Context context) {
+        if (context == null) {
+            return false;
+        }
+
+        KidsModeData data = KidsModeData.instance(context);
+
+        if (data.getTimerMinutes() <= 0) {
+            return false;
+        }
+
+        long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
+                data.getResetIntervalHours()) ? 0 : data.getUsedMs();
+
+        return usedMs >= KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
     }
 
     /** KIDS v1.7.5: the parent offered the end-of-video lock AND the player is in that mode. */
@@ -128,13 +186,32 @@ public class KidsTimeUpLock {
      * activity gets covered by {@link #applyOnResume} instead).
      */
     public static void arm(Activity activity) {
+        arm(activity, false);
+    }
+
+    /**
+     * KIDS v1.9: with {@code useMileMarker} the time-up black screen is replaced by the
+     * night-road overlay reflecting the real reset-window progress. The gate semantics
+     * (swallow keys, 10-press mash, PIN) are identical; Lock at end keeps classic black.
+     */
+    public static void arm(Activity activity, boolean useMileMarker) {
         armState();
+        sMileMarkerShown = useMileMarker;
 
         if (activity != null) {
-            KidsScreenHelper.showBlackScreen(activity);
+            cover(activity);
         }
 
-        Log.d(TAG, "Time-up lock armed");
+        Log.d(TAG, "Time-up lock armed (mileMarker=%s)", sMileMarkerShown);
+    }
+
+    /** The art chosen at arm time, re-applied by every re-cover path. */
+    private static void cover(Activity activity) {
+        if (sMileMarkerShown) {
+            MileMarkerOverlay.show(activity);
+        } else {
+            KidsScreenHelper.showBlackScreen(activity);
+        }
     }
 
     /**
@@ -155,7 +232,10 @@ public class KidsTimeUpLock {
             return;
         }
 
-        if (!KidsScreenHelper.isBlackScreenShown(activity)) {
+        if (sMileMarkerShown) {
+            // Idempotent (tick chain guarded) and re-hosts the view on the new activity.
+            MileMarkerOverlay.show(activity);
+        } else if (!KidsScreenHelper.isBlackScreenShown(activity)) {
             KidsScreenHelper.showBlackScreen(activity);
             Log.d(TAG, "Time-up lock re-applied on %s", activity.getClass().getSimpleName());
         }
@@ -193,7 +273,7 @@ public class KidsTimeUpLock {
         }
 
         // Re-cover first: a dialog, a transition or a resumed activity may have dropped it
-        KidsScreenHelper.showBlackScreen(activity);
+        cover(activity);
 
         final KidsModeData data = KidsModeData.instance(activity);
 
@@ -238,6 +318,7 @@ public class KidsTimeUpLock {
                         // One unlock for the whole parent session, exactly like KidsPinGate:
                         // opening Settings right after must not ask again.
                         KidsPinGate.unlock();
+                        unlockGateSession(activity);
                         release(activity);
                         return true;
                     }
@@ -255,7 +336,7 @@ public class KidsTimeUpLock {
                     sPinDialogShownAtMs = 0;
 
                     if (sLocked) {
-                        KidsScreenHelper.showBlackScreen(activity);
+                        cover(activity);
                     }
                 });
     }
@@ -319,10 +400,12 @@ public class KidsTimeUpLock {
     public static void release(Activity activity) {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        sMileMarkerShown = false;
         KidsTimeUpKeyGate.resetSequence();
 
         if (activity != null) {
             KidsScreenHelper.hideBlackScreen(activity);
+            MileMarkerOverlay.hide(activity);
             KidsScreenHelper.clearPendingScreenOff();
         }
 
@@ -337,6 +420,10 @@ public class KidsTimeUpLock {
     public static void releaseStateOnly() {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        // The overlay tick hides itself within 1 s once !isLocked — same self-clean
+        // contract as the black screen: no view work here.
+        sMileMarkerShown = false;
+        invalidateGateAuthorization();
         KidsTimeUpKeyGate.resetSequence();
     }
 }
