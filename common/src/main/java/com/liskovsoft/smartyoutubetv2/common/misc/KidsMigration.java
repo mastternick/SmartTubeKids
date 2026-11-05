@@ -23,6 +23,7 @@ public class KidsMigration {
     private static final String TAG = KidsMigration.class.getSimpleName();
     private static final String FLAG_KEY = "kids_migration_done_v124";
     private static final String FLAG_KEY_DAILY_RESET_FIX = "kids_migration_done_daily_reset_fix";
+    private static final String FLAG_KEY_RESET_UNIT_MINUTES = "kids_migration_reset_unit_minutes";
 
     private static volatile boolean sFirstLaunchAfterMigration;
 
@@ -66,6 +67,16 @@ public class KidsMigration {
                 prefs.setData(FLAG_KEY_DAILY_RESET_FIX, "1");
 
                 Log.d(TAG, "daily-reset-fix migration: cleared poisoned daily watch counters");
+            }
+
+            // KIDS v1.9.3: one-time reset interval unit migration hours → minutes.
+            if (!"1".equals(prefs.getData(FLAG_KEY_RESET_UNIT_MINUTES))) {
+                KidsModeData kids = KidsModeData.instance(context);
+
+                kids.migrateResetIntervalUnit();
+                prefs.setData(FLAG_KEY_RESET_UNIT_MINUTES, "1");
+
+                Log.d(TAG, "reset-unit migration: ran migrateResetIntervalUnit()");
             }
         } catch (Throwable e) {
             Log.e(TAG, "Migration failed: " + e);

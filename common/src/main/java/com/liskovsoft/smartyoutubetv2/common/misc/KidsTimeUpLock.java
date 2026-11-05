@@ -170,7 +170,7 @@ public class KidsTimeUpLock {
         }
 
         long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
-                data.getResetIntervalHours()) ? 0 : data.getUsedMs();
+                data.getResetIntervalMinutes()) ? 0 : data.getUsedMs();
 
         return usedMs >= KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
     }
@@ -414,16 +414,18 @@ public class KidsTimeUpLock {
 
     /**
      * Drop the lock without touching any view (new day, Kids Mode off, session extended).
-     * A still visible overlay is removed by the next key press, which is then no longer
-     * PIN-gated.
+     * A still visible overlay is removed here if there's a resumed activity to host it.
      */
     public static void releaseStateOnly() {
         sLocked = false;
         sPinDialogShownAtMs = 0;
-        // The overlay tick hides itself within 1 s once !isLocked — same self-clean
-        // contract as the black screen: no view work here.
-        sMileMarkerShown = false;
         invalidateGateAuthorization();
         KidsTimeUpKeyGate.resetSequence();
+
+        // KIDS v1.9.1: clear mile marker overlay if still on screen after lock release
+        Activity activity = MotherActivity.getResumedActivity();
+        if (activity != null && MileMarkerOverlay.isShown(activity)) {
+            MileMarkerOverlay.clearFor(activity);
+        }
     }
 }

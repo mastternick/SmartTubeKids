@@ -98,6 +98,14 @@ public class MileMarkerOverlay {
         sCelebrationAtMs = 0;
     }
 
+    /**
+     * Drop only the view (no state reset): used by the gate when the lock is released
+     * through a path that touches no view (releaseStateOnly). Idempotent, null-safe.
+     */
+    public static void clearFor(Activity activity) {
+        detach(activity);
+    }
+
     private static Activity getActivity() {
         return sActivity != null ? sActivity.get() : null;
     }
@@ -146,7 +154,7 @@ public class MileMarkerOverlay {
         KidsModeData data = KidsModeData.instance(activity);
         long now = System.currentTimeMillis();
         long startMs = data.getWindowStartMs();
-        long intervalMs = KidsQuotaWindow.intervalMs(data.getResetIntervalHours());
+        long intervalMs = KidsQuotaWindow.intervalMs(data.getResetIntervalMinutes());
         long elapsedMs = startMs > 0 && startMs <= now ? now - startMs : 0;
         int lit = elapsedMs >= intervalMs ? TOTAL_MARKERS : (int) (elapsedMs * TOTAL_MARKERS / intervalMs);
         long animationNow = SystemClock.uptimeMillis();
@@ -241,6 +249,45 @@ public class MileMarkerOverlay {
                         radius, color, brightness, green);
             }
 
+            // KIDS v1.9.1: the car sits ON the last lit lamp. Lamp i is lit when i < sLastLit
+            // and its centre is left + spacing * (i + 0.5), so the reached lamp centre is
+            // left + spacing * (sLastLit - 0.5): waiting at the road start before lamp 1, and
+            // parked at lamp 10 when the window is over. Same lit count as the lamps, so car
+            // and quota can never disagree; the clamp keeps the body inside the road.
+            if (sLastLit >= 0) {
+                float lamp = sLastLit > 0 ? sLastLit - 0.5f : 0f;
+                float carX = left + spacing * Math.min(Math.max(lamp, 0.3f), TOTAL_MARKERS - 0.3f);
+                float carY = height * 0.465f;
+                float carWidth = spacing * 0.55f;
+                float carHeight = height * 0.035f;
+
+                mPaint.setColor(0xFFE53935); // body
+                mPaint.setStyle(Paint.Style.FILL);
+                canvas.drawRect(carX - carWidth / 2f, carY, carX + carWidth / 2f, carY + carHeight, mPaint);
+
+                mPaint.setColor(0xFFC62828); // cabin
+                canvas.drawRect(carX - carWidth * 0.22f, carY - carHeight * 0.7f,
+                        carX + carWidth * 0.22f, carY + carHeight * 0.1f, mPaint);
+
+                mPaint.setColor(0xFF90CAF9); // window
+                canvas.drawRect(carX - carWidth * 0.14f, carY - carHeight * 0.55f,
+                        carX + carWidth * 0.14f, carY - carHeight * 0.05f, mPaint);
+
+                mPaint.setColor(0xFF212121); // wheels
+                canvas.drawCircle(carX - carWidth * 0.28f, carY + carHeight, carHeight * 0.32f, mPaint);
+                canvas.drawCircle(carX + carWidth * 0.28f, carY + carHeight, carHeight * 0.32f, mPaint);
+
+                // Headlight: off on the way, a beam once the reset is complete.
+                mPaint.setColor(glowing ? 0xFFFFF176 : 0xFFFFCC80);
+                canvas.drawCircle(carX + carWidth / 2f, carY + carHeight * 0.35f, carHeight * 0.2f, mPaint);
+
+                if (glowing) {
+                    mPaint.setAlpha(60);
+                    canvas.drawRect(carX + carWidth / 2f, carY + carHeight * 0.1f,
+                            carX + carWidth * 0.95f, carY + carHeight * 0.6f, mPaint);
+                    mPaint.setAlpha(255);
+                }
+            }
             if (glowing) {
                 mPaint.setColor(Color.WHITE);
                 mPaint.setTextSize(height * 0.035f);

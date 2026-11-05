@@ -191,11 +191,11 @@ public class KidsCountdownBadge {
 
     private static long remainingMs(Activity activity, KidsModeData data) {
         long now = System.currentTimeMillis();
-        int intervalHours = data.getResetIntervalHours();
+        int intervalMinutes = data.getResetIntervalMinutes();
 
         // A window that already moved on means a fresh quota. The rollover itself is done by
         // KidsModeController on its next tick — this must not write preferences every second.
-        long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalHours)
+        long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes)
                 ? 0
                 : data.getUsedMs();
 

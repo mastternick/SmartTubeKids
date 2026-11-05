@@ -264,7 +264,7 @@ Load-bearing rules (do not "simplify" them away):
 
 - **The lamps show REAL window progress, not a demo animation.** Each 1 s tick
   recomputes `lit = elapsed · 10 / intervalMs` from the persisted
-  `windowStartMs` / `resetIntervalHours` (`KidsQuotaWindow.intervalMs`). Stateless
+  `windowStartMs` / `resetIntervalMinutes` (`KidsQuotaWindow.intervalMs(int minutes)`). Stateless
   by design: a process death or re-arm inherits nothing, and opening the scene
   after the window already rolled shows all lamps lit without re-firing the
   green celebration.
@@ -287,8 +287,10 @@ Load-bearing rules (do not "simplify" them away):
   at the black screen's MIN_BRIGHTNESS).
 
 The same release expands the reset-interval options to
-**1/2/3/4/5/6/8/10/12/24 h** (`KidsModeData.RESET_INTERVAL_HOURS`; anything
-outside the set still sanitizes back to 24).
+**5/10/15/30/60/90/120/180/240/300/360/480/600/720/1440 min** (`KidsModeData.RESET_INTERVAL_MINUTES`;
+anything outside the set sanitizes back to 1440). The stored unit switched from hours to minutes
+with a one-time migration (`KidsMigration.migrateResetIntervalUnit`), and the settings UI shows
+values ≥ 60 as hours, values < 60 as minutes.
 
 ## Exiting kiosk
 

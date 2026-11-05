@@ -771,7 +771,7 @@
     <!-- KIDS v1.8: quota reset window + remaining-time countdown -->
     <string name="kids_reset_interval">Reset interval</string>
     <string name="kids_mile_marker_title">Mile Marker Mode</string>
-    <string name="kids_mile_marker_desc">When time is up, show a colorful road instead of a black screen. The child watches the countdown lights and waits for the reset.</string>
+    <string name="kids_mile_marker_desc">When time is up, a little car drives along the night road. As the reset window elapses, the lamps light up one by one. When the car reaches lamp 10 the reset is complete.</string>
     <string name="kids_countdown_warning">Remaining-time countdown</string>
     <string name="kids_countdown_off">Off</string>
     <string name="kids_calm_exit">Calm exit warnings</string>

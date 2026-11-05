@@ -20,11 +20,11 @@ public final class KidsQuotaWindow {
     }
 
     /**
-     * Length of the reset window. A non-positive choice falls back to 24 h, so a corrupted
-     * or hand-edited preference can never make the quota reset on every tick.
+     * Length of the reset window, in minutes. A non-positive choice falls back to 24 h, so a
+     * corrupted or hand-edited preference can never make the quota reset on every tick.
      */
-    public static long intervalMs(int intervalHours) {
-        return intervalHours > 0 ? intervalHours * HOUR_MS : 24 * HOUR_MS;
+    public static long intervalMs(int intervalMinutes) {
+        return intervalMinutes > 0 ? intervalMinutes * MINUTE_MS : 24 * HOUR_MS;
     }
 
     /**
@@ -36,10 +36,10 @@ public final class KidsQuotaWindow {
      * Aligning keeps the reset predictable for the parent and independent of when the child
      * happened to start watching.
      */
-    public static long windowStartMs(long nowMs, int intervalHours) {
+    public static long windowStartMs(long nowMs, int intervalMinutes) {
         long startOfDay = startOfDayMs(nowMs);
 
-        return startOfDay + ((nowMs - startOfDay) / intervalMs(intervalHours)) * intervalMs(intervalHours);
+        return startOfDay + ((nowMs - startOfDay) / intervalMs(intervalMinutes)) * intervalMs(intervalMinutes);
     }
 
     /** Local midnight of the day containing nowMs. */
@@ -68,8 +68,8 @@ public final class KidsQuotaWindow {
      * true whenever the stored boundary is not the one nowMs falls into, which also covers a
      * clock that jumped backwards.
      */
-    public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalHours) {
-        return storedWindowStartMs <= 0 || windowStartMs(nowMs, intervalHours) != storedWindowStartMs;
+    public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalMinutes) {
+        return storedWindowStartMs <= 0 || windowStartMs(nowMs, intervalMinutes) != storedWindowStartMs;
     }
 
     /**

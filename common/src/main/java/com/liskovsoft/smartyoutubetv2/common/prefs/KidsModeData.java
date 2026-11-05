@@ -16,18 +16,18 @@ public class KidsModeData {
     private static final String KIDS_MODE_DATA = "kids_mode_data";
 
     /**
-     * KIDS v1.8: default length of the quota reset window in hours.
-     * 24 keeps the behaviour every earlier build had (one reset per day).
+     * KIDS v1.8→v1.9.3: default length of the quota reset window in minutes.
+     * 1440 keeps the behaviour every earlier build had (one reset per day).
      */
-    public static final int DEFAULT_RESET_INTERVAL_HOURS = 24;
+    public static final int DEFAULT_RESET_INTERVAL_MINUTES = 1440;
 
     /**
      * KIDS v1.8: default lead time of the top-right countdown badge, in minutes.
      */
     public static final int DEFAULT_WARN_BEFORE_MINUTES = 5;
 
-    /** KIDS v1.8: reset-window lengths the parent can choose from (hours). */
-    public static final int[] RESET_INTERVAL_HOURS = {1, 2, 3, 4, 5, 6, 8, 10, 12, 24};
+    /** KIDS v1.9.3: reset-window lengths the parent can choose from (minutes). */
+    public static final int[] RESET_INTERVAL_MINUTES = {5, 10, 15, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 1440}; // minutes
 
     /** KIDS v1.8: countdown lead times the parent can choose from (minutes, 0 = off). */
     public static final int[] WARN_BEFORE_MINUTES = {0, 1, 2, 3, 5, 10, 15, 30};
@@ -57,7 +57,7 @@ public class KidsModeData {
     private boolean mKioskReleased;        // KIDS: parent left the app with the PIN — stays unlocked until it's opened again
     private boolean mRelockOnBoot;         // KIDS v1.7: should a real TV reboot re-arm kiosk? (default OFF = release survives)
     private boolean mLockAtVideoEnd;       // KIDS v1.7.5: offer the "lock at end" playback mode (black screen + PIN when a clip ends)
-    private int mResetIntervalHours;       // KIDS v1.8: how often the quota resets (hours, see RESET_INTERVAL_HOURS)
+    private int mResetIntervalMinutes;     // KIDS v1.9.3: how often the quota resets (minutes, see RESET_INTERVAL_MINUTES)
     private int mWarnBeforeMinutes;        // KIDS v1.8: show the countdown badge this many minutes before the limit (0 = off)
     private boolean mUseMileMarker;
 
@@ -69,6 +69,25 @@ public class KidsModeData {
     private KidsModeData(Context context) {
         mAppPrefs = AppPrefs.instance(context);
         restoreData();
+    }
+
+    /**
+     * KIDS v1.9.3: one-time unit migration for the persisted reset interval. Every shipped
+     * older build stored blob slot 21 in HOURS ({1..24}); the canonical unit is now MINUTES.
+     * A stored value of 1..59 can only be an old hours value (all hour options are &lt;= 24,
+     * and the fine-grained minute options only exist in builds that already carry the
+     * migration flag), so it is multiplied by 60. Larger values are already minutes; a
+     * missing or non-integer slot (short-lived float experiment, or a blob predating the
+     * setting) is left untouched and falls back to the default in restoreData.
+     * Runs exactly once from KidsMigration, guarded by its flag, before consumers read it.
+     */
+    public void migrateResetIntervalUnit() {
+        String[] split = Helpers.splitData(mAppPrefs.getData(KIDS_MODE_DATA));
+        int stored = Helpers.parseInt(split, 21, -1);
+
+        if (stored > 0 && stored < 60) {
+            setResetIntervalMinutes(stored * 60);
+        }
     }
 
     public static KidsModeData instance(Context context) {
@@ -151,24 +170,24 @@ public class KidsModeData {
         persistData();
     }
 
-    // --- Reset interval (KIDS v1.8) ---
+    // --- Reset interval (KIDS v1.9.3: minutes; migrated from hours) ---
 
     /**
-     * KIDS v1.8: how often the watch quota resets, in hours. The parent picks one of
-     * {@link #RESET_INTERVAL_HOURS}; anything else (e.g. a hand-edited blob) is returned
+     * KIDS v1.9.3: how often the watch quota resets, in minutes. The parent picks one of
+     * {@link #RESET_INTERVAL_MINUTES}; anything else (e.g. a hand-edited blob) is returned
      * as stored so the caller can decide. The window itself is anchored at
      * {@link #getWindowStartMs()} and rolled over by KidsModeController, never here.
      */
-    public int getResetIntervalHours() {
-        return mResetIntervalHours;
+    public int getResetIntervalMinutes() {
+        return mResetIntervalMinutes;
     }
 
-    public void setResetIntervalHours(int hours) {
-        if (mResetIntervalHours == hours) {
+    public void setResetIntervalMinutes(int minutes) {
+        if (mResetIntervalMinutes == minutes) {
             return;
         }
 
-        mResetIntervalHours = hours;
+        mResetIntervalMinutes = minutes;
         persistData();
     }
 
@@ -552,7 +571,7 @@ public class KidsModeData {
         mKioskReleased        = Helpers.parseBoolean(split, 18, false); // KIDS: PIN exit release (default locked)
         mRelockOnBoot         = Helpers.parseBoolean(split, 19, false); // KIDS v1.7: reboot re-arms kiosk? (default: no)
         mLockAtVideoEnd       = Helpers.parseBoolean(split, 20, false); // KIDS v1.7.5: offer "lock at end"? (default: no)
-        mResetIntervalHours   = sanitize(split, 21, RESET_INTERVAL_HOURS, DEFAULT_RESET_INTERVAL_HOURS); // KIDS v1.8
+        mResetIntervalMinutes = sanitize(split, 21, RESET_INTERVAL_MINUTES, DEFAULT_RESET_INTERVAL_MINUTES); // KIDS v1.9.3
         mWarnBeforeMinutes    = sanitize(split, 22, WARN_BEFORE_MINUTES, DEFAULT_WARN_BEFORE_MINUTES);   // KIDS v1.8
         mUseMileMarker        = Helpers.parseBoolean(split, 23, false);
     }
@@ -581,6 +600,6 @@ public class KidsModeData {
                         mWindowStartMs, mUsedMs, mBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
-                        mLockAtVideoEnd, mResetIntervalHours, mWarnBeforeMinutes, mUseMileMarker));
+                        mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker));
     }
 }

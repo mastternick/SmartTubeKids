@@ -37,7 +37,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         void onPinChanged(String newPin);
     }
 
-    private static final int[] TIMER_OPTIONS_MIN = {0, 15, 30, 45, 60, 90, 120};
+    private static final int[] TIMER_OPTIONS_MIN = {0, 5, 10, 15, 30, 45, 60, 90, 120};
     private static final int[] EXTEND_OPTIONS_MIN = {5, 10, 15, 30};
 
     private final KidsModeData mKidsData;
@@ -382,12 +382,19 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
     private void appendResetIntervalCategory(AppDialogPresenter settingsPresenter) {
         List<OptionItem> options = new ArrayList<>();
 
-        for (int hours : KidsModeData.RESET_INTERVAL_HOURS) {
-            options.add(UiOptionItem.from(hours + " h",
-                    option -> mKidsData.setResetIntervalHours(hours),
-                    mKidsData.getResetIntervalHours() == hours));
+        for (int minutes : KidsModeData.RESET_INTERVAL_MINUTES) {
+            String label;
+            if (minutes < 60) {
+                label = minutes + " min";
+            } else if (minutes % 60 == 0) {
+                label = (minutes / 60) + " h";
+            } else {
+                label = minutes + " min";
+            }
+            options.add(UiOptionItem.from(label,
+                    option -> mKidsData.setResetIntervalMinutes(minutes),
+                    mKidsData.getResetIntervalMinutes() == minutes));
         }
-
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_reset_interval), options);
     }
 

@@ -483,7 +483,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     }
 
     private long getWindowStartMs(long nowMs) {
-        return KidsQuotaWindow.windowStartMs(nowMs, mKidsData.getResetIntervalHours());
+        return KidsQuotaWindow.windowStartMs(nowMs, mKidsData.getResetIntervalMinutes());
     }
 
     private void stopCounting() {
@@ -521,13 +521,13 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      */
     private void resetWindowIfNeeded() {
         long now = System.currentTimeMillis();
-        int intervalHours = mKidsData.getResetIntervalHours();
+        int intervalMinutes = mKidsData.getResetIntervalMinutes();
 
-        if (!KidsQuotaWindow.isWindowExpired(mKidsData.getWindowStartMs(), now, intervalHours)) {
+        if (!KidsQuotaWindow.isWindowExpired(mKidsData.getWindowStartMs(), now, intervalMinutes)) {
             return;
         }
 
-        mKidsData.resetWindow(KidsQuotaWindow.windowStartMs(now, intervalHours));
+        mKidsData.resetWindow(KidsQuotaWindow.windowStartMs(now, intervalMinutes));
         resetWarnings();
         // KIDS: a fresh window means a fresh quota — never keep the child locked past the reset
         KidsTimeUpLock.releaseStateOnly();
