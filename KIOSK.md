@@ -255,10 +255,18 @@ When the parent enables **Mile Marker Mode** in Kids Mode settings, the time-up
 black screen (force stop path) is replaced by a night-road scene drawn on the
 activity decor (`MileMarkerOverlay`): a dark road with ten **numbered markers
 (1–10)**, each flanked by street-light poles. Nothing about the gate changes —
-keys are still swallowed, the PIN dialog still needs 10 escape presses in 10 s,
-release still happens only through the PIN or the quota window actually
-rolling over (`resetWindow` → `releaseStateOnly`). The overlay NEVER releases
-the lock by itself.
+keys are still swallowed and the PIN dialog still needs 10 escape presses in 10 s.
+The overlay NEVER releases the lock by itself.
+
+**KIDS v1.9.4: quota gate auto-opens at reset boundary.** The quota gate (force stop path) now schedules a
+one-shot task at the end of the current reset window. When the window ends, the fresh quota is written and the
+gate releases **without a PIN** — Back and Home work again. Lock-at-end mode is deliberately excluded: it still
+requires the PIN. The boundary is computed from the clock-aligned grid (same authority as `isWindowExpired`),
+so the gate, the countdown badge and the Mile Marker lamps can never disagree about when the reset happens.
+On a fresh install (no window stored yet) the anchor falls back to the aligned window containing now, so the
+gate waits a full interval instead of opening at the 1 s clamp. The task uses the application context (not the
+Activity, which is destroyed by `forceFinish()`) and is cancelled in `release()` and `releaseStateOnly()` to
+prevent chain stacking.
 
 Load-bearing rules (do not "simplify" them away):
 

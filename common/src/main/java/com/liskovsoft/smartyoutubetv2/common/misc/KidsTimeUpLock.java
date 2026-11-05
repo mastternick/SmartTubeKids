@@ -12,6 +12,7 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
+import java.lang.ref.WeakReference;
 
 /**
  * KIDS: PIN-locked black screen shown when the daily watch limit expires with
@@ -46,6 +47,7 @@ public class KidsTimeUpLock {
     // no way to ever type the PIN.
     private static final long PIN_DIALOG_THROTTLE_MS = 30_000L;
     private static final long GATE_SESSION_MS = 10 * 60_000L;
+    private static final long ROLLOVER_MIN_MS = 1_000L; // clamp for a boundary that rounds to now
 
     private static boolean sLocked;
     private static long sPinDialogShownAtMs;
@@ -56,6 +58,12 @@ public class KidsTimeUpLock {
     // Armed-state flag: mile overlay vs classic black screen. Not the pref — a settings change mid-lock
     // cannot swap the art under the child; next arm re-reads the pref.
     private static boolean sMileMarkerShown;
+    // KIDS v1.9.4: the quota gate opens itself at the end of the reset window (no PIN).
+    // One-shot task + the context it was scheduled with. sQuotaGate distinguishes the
+    // quota gate (rollover applies) from Lock-at-end (it does not).
+    private static final Runnable sRolloverTask = KidsTimeUpLock::onRolloverCheck;
+    private static WeakReference<Context> sRolloverContext;
+    private static boolean sQuotaGate;
 
     private KidsTimeUpLock() {
     }
@@ -186,7 +194,15 @@ public class KidsTimeUpLock {
      * activity gets covered by {@link #applyOnResume} instead).
      */
     public static void arm(Activity activity) {
-        arm(activity, false);
+        armState();
+        sMileMarkerShown = false;
+        sQuotaGate = false; // KIDS v1.9.4: Lock-at-end is not quota-driven — no rollover task
+
+        if (activity != null) {
+            cover(activity);
+        }
+
+        Log.d(TAG, "Time-up lock armed (classic black)");
     }
 
     /**
@@ -200,6 +216,16 @@ public class KidsTimeUpLock {
 
         if (activity != null) {
             cover(activity);
+        }
+
+        sQuotaGate = true;
+
+        // KIDS v1.9.4: the quota gate must open BY ITSELF when the reset window rolls
+        // over — nothing plays while the child sits on it, so the controller's tickle
+        // (the only other rollover caller) never fires. One-shot at the window boundary,
+        // not a poll.
+        if (activity != null) {
+            scheduleRolloverCheck(activity);
         }
 
         Log.d(TAG, "Time-up lock armed (mileMarker=%s)", sMileMarkerShown);
@@ -230,6 +256,13 @@ public class KidsTimeUpLock {
     public static void applyOnResume(Activity activity) {
         if (!sLocked || activity == null) {
             return;
+        }
+
+        // KIDS v1.9.4: re-anchor the rollover one-shot on every resume — a TV that slept
+        // past the boundary wakes up here; a quota gate armed without an activity gets its
+        // first schedule. scheduleRolloverCheck removes any previous posting, no stacking.
+        if (sQuotaGate) {
+            scheduleRolloverCheck(activity);
         }
 
         if (sMileMarkerShown) {
@@ -401,6 +434,9 @@ public class KidsTimeUpLock {
         sLocked = false;
         sPinDialogShownAtMs = 0;
         sMileMarkerShown = false;
+        sQuotaGate = false;
+        sRolloverContext = null;
+        Utils.removeCallbacks(sRolloverTask);
         KidsTimeUpKeyGate.resetSequence();
 
         if (activity != null) {
@@ -419,6 +455,9 @@ public class KidsTimeUpLock {
     public static void releaseStateOnly() {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        sQuotaGate = false;
+        sRolloverContext = null;
+        Utils.removeCallbacks(sRolloverTask);
         invalidateGateAuthorization();
         KidsTimeUpKeyGate.resetSequence();
 
@@ -427,5 +466,85 @@ public class KidsTimeUpLock {
         if (activity != null && MileMarkerOverlay.isShown(activity)) {
             MileMarkerOverlay.clearFor(activity);
         }
+    }
+
+    /**
+     * KIDS v1.9.4: (re)arm the one-shot that fires when the reset window ends.
+     * removeCallbacks first, so arm + every resume cannot stack chains. The boundary is
+     * the CURRENT aligned window's end: when no window is stored yet (fresh install /
+     * right after the daily-reset migration cleared it) the anchor is the window that
+     * contains now, NOT now itself — isWindowExpired treats a 0 start as expired, so a
+     * now-anchor would open the gate at the 1 s clamp instead of at the real boundary.
+     * No limit set (timer 0) means there is no gate to open, so nothing is scheduled.
+     */
+    private static void scheduleRolloverCheck(Context context) {
+        if (context == null) {
+            return;
+        }
+
+        KidsModeData data = KidsModeData.instance(context);
+
+        if (data.getTimerMinutes() <= 0) {
+            return; // no watch limit: nothing rolls over, nothing to unlock
+        }
+
+        // The host activity is destroyed right after arming (presenter.forceFinish()), so
+        // anchor on the application context — a WeakReference to the activity would clear
+        // and the check would silently never run if the child sleeps on the gate.
+        sRolloverContext = new WeakReference<>(context.getApplicationContext());
+
+        int intervalMinutes = data.getResetIntervalMinutes();
+        long now = System.currentTimeMillis();
+        // Single source of truth for "when does this window end": the ALIGNED grid, the
+        // same authority KidsQuotaWindow.isWindowExpired uses. The stored start can lag
+        // the grid by up to a tickle (~60 s) when a clip crosses a boundary, so
+        // storedStart + intervalMs could land in the past and turn the one-shot into a
+        // 1 s wake loop. windowStartMs(now) + intervalMs is always the real end of the
+        // window containing now, so the repost path re-anchors on a future boundary.
+        long boundaryMs = KidsQuotaWindow.windowStartMs(now, intervalMinutes)
+                + KidsQuotaWindow.intervalMs(intervalMinutes);
+        long delayMs = Math.max(ROLLOVER_MIN_MS, boundaryMs - now);
+
+        Utils.removeCallbacks(sRolloverTask);
+        Utils.postDelayed(sRolloverTask, delayMs);
+    }
+
+    /**
+     * KIDS v1.9.4: the reset window has moved on — write the fresh quota and open the gate
+     * WITHOUT a PIN, so Back/Home work again. If the boundary shifted meanwhile (interval
+     * change, backwards clock jump) the window is not expired yet: re-schedule instead.
+     */
+    private static void onRolloverCheck() {
+        if (!sLocked || !sQuotaGate) {
+            return; // released meanwhile
+        }
+
+        Context context = sRolloverContext != null ? sRolloverContext.get() : null;
+
+        if (context == null) {
+            Activity resumed = MotherActivity.getResumedActivity();
+
+            if (resumed != null) {
+                scheduleRolloverCheck(resumed);
+            }
+
+            return;
+        }
+
+        KidsModeData data = KidsModeData.instance(context);
+        long now = System.currentTimeMillis();
+        int intervalMinutes = data.getResetIntervalMinutes();
+
+        if (!KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes)) {
+            scheduleRolloverCheck(context); // boundary moved: wait for the real one
+            return;
+        }
+
+        data.resetWindow(KidsQuotaWindow.windowStartMs(now, intervalMinutes));
+
+        // View cleanup through release(): the mile scene / black screen must go with the gate.
+        release(MotherActivity.getResumedActivity());
+
+        Log.d(TAG, "Reset window rolled over while locked: gate opened without PIN");
     }
 }

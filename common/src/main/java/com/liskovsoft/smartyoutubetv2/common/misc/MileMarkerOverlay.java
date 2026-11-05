@@ -154,8 +154,14 @@ public class MileMarkerOverlay {
         KidsModeData data = KidsModeData.instance(activity);
         long now = System.currentTimeMillis();
         long startMs = data.getWindowStartMs();
-        long intervalMs = KidsQuotaWindow.intervalMs(data.getResetIntervalMinutes());
-        long elapsedMs = startMs > 0 && startMs <= now ? now - startMs : 0;
+        int intervalMinutes = data.getResetIntervalMinutes();
+        long intervalMs = KidsQuotaWindow.intervalMs(intervalMinutes);
+        // A window that is not stored yet (fresh install, or right after the migration
+        // cleared it) still progresses: anchor on the aligned window containing now,
+        // otherwise the lamps would stay dark for the whole first window while the
+        // gate itself counts down correctly.
+        long anchor = startMs > 0 ? startMs : KidsQuotaWindow.windowStartMs(now, intervalMinutes);
+        long elapsedMs = Math.max(0, now - anchor);
         int lit = elapsedMs >= intervalMs ? TOTAL_MARKERS : (int) (elapsedMs * TOTAL_MARKERS / intervalMs);
         long animationNow = SystemClock.uptimeMillis();
 
