@@ -18,8 +18,13 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import java.lang.ref.WeakReference;
 
 /**
- * KIDS: a silent night-road view of the real quota reset window.
+ * KIDS v1.9.4: a silent night-road view of the real quota reset window.
  * Main-thread only. Progress is read from preferences, never advanced by the animation.
+ *
+ * Continuous car: the car moves continuously from start to finish over the interval duration.
+ * Progressive lamps: each lamp lights up (medium brightness) when the car passes it,
+ * and all lamps reach maximum brightness when the car reaches finish.
+ * Same aligned-grid authority as the rollover one-shot in KidsTimeUpLock.
  */
 public class MileMarkerOverlay {
     private static final long TICK_MS = 1_000L;
@@ -33,12 +38,35 @@ public class MileMarkerOverlay {
     private static final int ROAD_COLOR = Color.parseColor("#333333");
     private static final String[] MARKER_LABELS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
 
+    // Car visual constants
+    private static final int CAR_BODY_COLOR = Color.parseColor("#FFE53935");
+    private static final int CAR_CABIN_COLOR = Color.parseColor("#FFC62828");
+    private static final int CAR_WINDOW_COLOR = Color.parseColor("#FF90CAF9");
+    private static final int CAR_WHEEL_COLOR = Color.parseColor("#FF212121");
+    private static final int CAR_HEADLIGHT_COLOR = Color.parseColor("#FFFFCC80");
+    private static final int CAR_HEADLIGHT_GLOW = Color.parseColor("#FFFFF176");
+
+    // Road layout: 5% margin on each side, 10 lamps evenly distributed between them
+    private static final float ROAD_MARGIN_FRAC = 0.05f;
+    private static final float CAR_START_MARGIN_FRAC = 0.03f;
+    private static final float CAR_END_MARGIN_FRAC = 0.03f;
+    private static final float CAR_WIDTH_FRAC = 0.04f;
+    private static final float CAR_HEIGHT_FRAC = 0.035f;
+    private static final float LAMP_RADIUS_FRAC = 0.012f;
+    private static final float LAMP_GLOW_RADIUS_FRAC = 0.04f;
+    private static final float LAMP_POST_WIDTH_FRAC = 0.002f;
+    private static final float LAMP_POST_HEIGHT_FRAC = 0.13f;
+    private static final int LAMP_GLOW_ALPHA_GLOW = 42;
+    private static final int LAMP_GLOW_ALPHA_MED = 22;
+    private static final int LAMP_GLOW_ALPHA_MAX = 85;
+    private static final int LAMP_BRIGHTNESS_MED = 50;
+
     private static final Runnable sTick = () -> tick();
 
     private static WeakReference<Activity> sActivity;
-    private static int sLastLit = -1;
+    private static float sLastProgress = -1f; // continuous progress 0.0..1.0
+    private static long sProgressChangedAtMs;
     private static boolean sCelebrated;
-    private static long sMarkerLitAtMs;
     private static long sCelebrationAtMs;
 
     private MileMarkerOverlay() {
@@ -92,9 +120,9 @@ public class MileMarkerOverlay {
         }
 
         sActivity = null;
-        sLastLit = -1;
+        sLastProgress = -1f;
         sCelebrated = false;
-        sMarkerLitAtMs = 0;
+        sProgressChangedAtMs = 0;
         sCelebrationAtMs = 0;
     }
 
@@ -156,29 +184,27 @@ public class MileMarkerOverlay {
         long startMs = data.getWindowStartMs();
         int intervalMinutes = data.getResetIntervalMinutes();
         long intervalMs = KidsQuotaWindow.intervalMs(intervalMinutes);
-        // A window that is not stored yet (fresh install, or right after the migration
-        // cleared it) still progresses: anchor on the aligned window containing now,
-        // otherwise the lamps would stay dark for the whole first window while the
-        // gate itself counts down correctly.
+        // Anchor on the aligned window containing now (same authority as rollover one-shot).
+        // Fresh install (startMs==0) still progresses: the scene mirrors the gate's real state.
         long anchor = startMs > 0 ? startMs : KidsQuotaWindow.windowStartMs(now, intervalMinutes);
         long elapsedMs = Math.max(0, now - anchor);
-        int lit = elapsedMs >= intervalMs ? TOTAL_MARKERS : (int) (elapsedMs * TOTAL_MARKERS / intervalMs);
+        float progress = intervalMs > 0 ? Math.min(1.0f, (float) elapsedMs / (float) intervalMs) : 0f;
         long animationNow = SystemClock.uptimeMillis();
 
-        if (lit != sLastLit) {
-            sMarkerLitAtMs = sLastLit >= 0 && lit > sLastLit ? animationNow : 0;
+        if (progress != sLastProgress) {
+            sProgressChangedAtMs = animationNow;
         }
 
-        if (lit < TOTAL_MARKERS) {
+        if (progress < 1.0f) {
             sCelebrated = false;
             sCelebrationAtMs = 0;
         } else if (!sCelebrated) {
             // Opening an already-finished window is not a new completion event.
-            sCelebrationAtMs = sLastLit >= 0 ? animationNow : 0;
+            sCelebrationAtMs = sLastProgress >= 0 ? animationNow : 0;
             sCelebrated = true;
         }
 
-        sLastLit = lit;
+        sLastProgress = progress;
 
         View overlay = activity.getWindow().getDecorView().findViewWithTag(OVERLAY_TAG);
 
@@ -212,36 +238,67 @@ public class MileMarkerOverlay {
             float height = getHeight();
             float left = width * 0.06f;
             float right = width * 0.94f;
+            float roadWidth = right - left;
             float centerY = height * 0.5f;
             float roadTop = height * 0.42f;
             float roadBottom = height * 0.58f;
-            float spacing = (right - left) / TOTAL_MARKERS;
-            float radius = Math.min(spacing * 0.075f, height * 0.012f);
             long now = SystemClock.uptimeMillis();
             long completionMs = sCelebrationAtMs > 0 ? now - sCelebrationAtMs : -1;
             long flashElapsedMs = completionMs - MARKER_LIGHT_UP_DURATION;
             boolean glowing = completionMs >= 0 && flashElapsedMs >= TOTAL_MARKERS * FLASH_MS;
 
+            // Road surface
             mPaint.setColor(ROAD_COLOR);
             canvas.drawRect(left, roadTop, right, roadBottom, mPaint);
             mPaint.setColor(0xFF89919B);
             canvas.drawRect(left, roadTop, right, roadTop + height * 0.003f, mPaint);
             canvas.drawRect(left, roadBottom - height * 0.003f, right, roadBottom, mPaint);
 
+            // Road layout: 5% margin on each side, 10 lamps evenly distributed between them
+            float roadLeft = left + roadWidth * ROAD_MARGIN_FRAC;
+            float roadRight = right - roadWidth * ROAD_MARGIN_FRAC;
+            float roadLength = roadRight - roadLeft;
+            float lampSpacing = roadLength / (TOTAL_MARKERS - 1); // 9 intervals for 10 lamps
+            float[] lampX = new float[TOTAL_MARKERS];
             for (int i = 0; i < TOTAL_MARKERS; i++) {
-                float x = left + spacing * (i + 0.5f);
+                lampX[i] = roadLeft + i * lampSpacing;
+            }
+
+            // Car position: continuous progress from carStartX to carEndX
+            float carStartX = roadLeft - roadWidth * CAR_START_MARGIN_FRAC;
+            float carEndX = roadRight + roadWidth * CAR_END_MARGIN_FRAC;
+            float carX = carStartX + sLastProgress * (carEndX - carStartX);
+            float carY = height * 0.465f;
+            float carWidth = roadWidth * CAR_WIDTH_FRAC;
+            float carHeight = height * CAR_HEIGHT_FRAC;
+
+            // Draw lamps with progressive brightness
+            float lampRadius = Math.min(lampSpacing * LAMP_RADIUS_FRAC, height * LAMP_RADIUS_FRAC);
+            float lampPostWidth = roadWidth * LAMP_POST_WIDTH_FRAC;
+            float lampPostHeight = height * LAMP_POST_HEIGHT_FRAC;
+
+            for (int i = 0; i < TOTAL_MARKERS; i++) {
+                float x = lampX[i];
+
+                // Lamp number and marking
                 mPaint.setColor(Color.WHITE);
-                canvas.drawRect(x - spacing * 0.21f, centerY - height * 0.004f,
-                        x + spacing * 0.21f, centerY + height * 0.004f, mPaint);
+                canvas.drawRect(x - lampSpacing * 0.21f, centerY - height * 0.004f,
+                        x + lampSpacing * 0.21f, centerY + height * 0.004f, mPaint);
                 mPaint.setTextSize(height * 0.027f);
                 canvas.drawText(MARKER_LABELS[i], x, centerY + height * 0.05f, mPaint);
 
-                float brightness = i < sLastLit ? 1f : 0f;
-
-                if (i == sLastLit - 1 && sMarkerLitAtMs > 0) {
-                    brightness = Math.min(1f, (now - sMarkerLitAtMs) / (float) MARKER_LIGHT_UP_DURATION);
+                // Lamp brightness: 0 if car hasn't reached it, 0.5 if passed but not at finish, 1.0 at finish
+                float brightness = 0f;
+                if (carX >= x) {
+                    brightness = (carX >= roadRight) ? 1.0f : 0.5f;
                 }
 
+                // Animated brightness for newly reached lamp (smooth transition)
+                if (i == 0 && sProgressChangedAtMs > 0 && carX >= x) {
+                    brightness = Math.min(1.0f, (now - sProgressChangedAtMs) / (float) MARKER_LIGHT_UP_DURATION);
+                }
+
+                // Lamp color: dark when off, amber when on, green when celebrating
                 int color = blend(POLE_DARK, POLE_LIT, brightness);
                 boolean green = glowing || (flashElapsedMs >= 0 && flashElapsedMs / FLASH_MS == i);
 
@@ -249,44 +306,45 @@ public class MileMarkerOverlay {
                     color = GLOW_GREEN;
                 }
 
-                drawPole(canvas, x, roadTop - height * 0.025f, roadTop - height * 0.13f,
-                        radius, color, brightness, green);
-                drawPole(canvas, x, roadBottom + height * 0.025f, roadBottom + height * 0.13f,
-                        radius, color, brightness, green);
+                // Draw lamp post and bulb (top)
+                drawPole(canvas, x, roadTop - height * 0.025f, roadTop - lampPostHeight,
+                        lampRadius, color, brightness, green);
+                // Draw lamp post and bulb (bottom)
+                drawPole(canvas, x, roadBottom + height * 0.025f, roadBottom + lampPostHeight,
+                        lampRadius, color, brightness, green);
             }
 
-            // KIDS v1.9.1: the car sits ON the last lit lamp. Lamp i is lit when i < sLastLit
-            // and its centre is left + spacing * (i + 0.5), so the reached lamp centre is
-            // left + spacing * (sLastLit - 0.5): waiting at the road start before lamp 1, and
-            // parked at lamp 10 when the window is over. Same lit count as the lamps, so car
-            // and quota can never disagree; the clamp keeps the body inside the road.
-            if (sLastLit >= 0) {
-                float lamp = sLastLit > 0 ? sLastLit - 0.5f : 0f;
-                float carX = left + spacing * Math.min(Math.max(lamp, 0.3f), TOTAL_MARKERS - 0.3f);
-                float carY = height * 0.465f;
-                float carWidth = spacing * 0.55f;
-                float carHeight = height * 0.035f;
-
-                mPaint.setColor(0xFFE53935); // body
+            // Draw car (only if progress > 0)
+            if (sLastProgress > 0) {
+                // Car body
+                mPaint.setColor(CAR_BODY_COLOR);
                 mPaint.setStyle(Paint.Style.FILL);
-                canvas.drawRect(carX - carWidth / 2f, carY, carX + carWidth / 2f, carY + carHeight, mPaint);
+                canvas.drawRect(carX - carWidth / 2f, carY, carX + carWidth / 2f,
+                        carY + carHeight, mPaint);
 
-                mPaint.setColor(0xFFC62828); // cabin
+                // Car cabin
+                mPaint.setColor(CAR_CABIN_COLOR);
                 canvas.drawRect(carX - carWidth * 0.22f, carY - carHeight * 0.7f,
                         carX + carWidth * 0.22f, carY + carHeight * 0.1f, mPaint);
 
-                mPaint.setColor(0xFF90CAF9); // window
+                // Car window
+                mPaint.setColor(CAR_WINDOW_COLOR);
                 canvas.drawRect(carX - carWidth * 0.14f, carY - carHeight * 0.55f,
                         carX + carWidth * 0.14f, carY - carHeight * 0.05f, mPaint);
 
-                mPaint.setColor(0xFF212121); // wheels
-                canvas.drawCircle(carX - carWidth * 0.28f, carY + carHeight, carHeight * 0.32f, mPaint);
-                canvas.drawCircle(carX + carWidth * 0.28f, carY + carHeight, carHeight * 0.32f, mPaint);
+                // Car wheels
+                mPaint.setColor(CAR_WHEEL_COLOR);
+                canvas.drawCircle(carX - carWidth * 0.28f, carY + carHeight,
+                        carHeight * 0.32f, mPaint);
+                canvas.drawCircle(carX + carWidth * 0.28f, carY + carHeight,
+                        carHeight * 0.32f, mPaint);
 
-                // Headlight: off on the way, a beam once the reset is complete.
-                mPaint.setColor(glowing ? 0xFFFFF176 : 0xFFFFCC80);
-                canvas.drawCircle(carX + carWidth / 2f, carY + carHeight * 0.35f, carHeight * 0.2f, mPaint);
+                // Headlight
+                mPaint.setColor(glowing ? CAR_HEADLIGHT_GLOW : CAR_HEADLIGHT_COLOR);
+                canvas.drawCircle(carX + carWidth / 2f, carY + carHeight * 0.35f,
+                        carHeight * 0.2f, mPaint);
 
+                // Headlight beam when celebrating
                 if (glowing) {
                     mPaint.setAlpha(60);
                     canvas.drawRect(carX + carWidth / 2f, carY + carHeight * 0.1f,
@@ -294,14 +352,17 @@ public class MileMarkerOverlay {
                     mPaint.setAlpha(255);
                 }
             }
+
+            // "Reset complete!" text when finished
             if (glowing) {
                 mPaint.setColor(Color.WHITE);
                 mPaint.setTextSize(height * 0.035f);
-                canvas.drawText(getContext().getString(R.string.kids_mile_marker_done), width * 0.5f, height * 0.78f, mPaint);
+                canvas.drawText(getContext().getString(R.string.kids_mile_marker_done),
+                        width * 0.5f, height * 0.78f, mPaint);
             }
 
-            // Animate only a newly lit marker and the one-shot completion sweep.
-            if ((sMarkerLitAtMs > 0 && now - sMarkerLitAtMs < MARKER_LIGHT_UP_DURATION)
+            // Animate only a newly reached lamp and the one-shot completion sweep
+            if ((sProgressChangedAtMs > 0 && now - sProgressChangedAtMs < MARKER_LIGHT_UP_DURATION)
                     || (completionMs >= 0 && !glowing)) {
                 postInvalidateOnAnimation();
             }
@@ -315,9 +376,11 @@ public class MileMarkerOverlay {
             canvas.drawLine(x - radius * 1.5f, lightY, x, lightY, mPaint);
 
             if (brightness > 0f) {
-                mPaint.setAlpha((int) (brightness * (green ? 42 : 22)));
+                int outerAlpha = green ? LAMP_GLOW_ALPHA_GLOW : LAMP_GLOW_ALPHA_MED;
+                int innerAlpha = green ? LAMP_GLOW_ALPHA_MAX : LAMP_BRIGHTNESS_MED;
+                mPaint.setAlpha((int) (brightness * outerAlpha));
                 canvas.drawCircle(x, lightY, radius * 4f, mPaint);
-                mPaint.setAlpha((int) (brightness * (green ? 85 : 50)));
+                mPaint.setAlpha((int) (brightness * innerAlpha));
                 canvas.drawCircle(x, lightY, radius * 2.5f, mPaint);
             }
 
