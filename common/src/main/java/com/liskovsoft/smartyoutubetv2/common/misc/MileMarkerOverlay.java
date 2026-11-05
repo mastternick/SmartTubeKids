@@ -184,9 +184,9 @@ public class MileMarkerOverlay {
         long startMs = data.getWindowStartMs();
         int intervalMinutes = data.getResetIntervalMinutes();
         long intervalMs = KidsQuotaWindow.intervalMs(intervalMinutes);
-        // Anchor on the aligned window containing now (same authority as rollover one-shot).
-        // Fresh install (startMs==0) still progresses: the scene mirrors the gate's real state.
-        long anchor = startMs > 0 ? startMs : KidsQuotaWindow.windowStartMs(now, intervalMinutes);
+        // KIDS v1.9.5: the stored window start IS the cooldown start (written at the expiry
+        // instant). The car traverses the road over exactly one interval from there.
+        long anchor = startMs > 0 ? startMs : now;
         long elapsedMs = Math.max(0, now - anchor);
         float progress = intervalMs > 0 ? Math.min(1.0f, (float) elapsedMs / (float) intervalMs) : 0f;
         long animationNow = SystemClock.uptimeMillis();
@@ -287,15 +287,17 @@ public class MileMarkerOverlay {
                 mPaint.setTextSize(height * 0.027f);
                 canvas.drawText(MARKER_LABELS[i], x, centerY + height * 0.05f, mPaint);
 
-                // Lamp brightness: 0 if car hasn't reached it, 0.5 if passed but not at finish, 1.0 at finish
-                float brightness = 0f;
-                if (carX >= x) {
-                    brightness = (carX >= roadRight) ? 1.0f : 0.5f;
-                }
-
-                // Animated brightness for newly reached lamp (smooth transition)
-                if (i == 0 && sProgressChangedAtMs > 0 && carX >= x) {
-                    brightness = Math.min(1.0f, (now - sProgressChangedAtMs) / (float) MARKER_LIGHT_UP_DURATION);
+                // KIDS v1.9.5: lamps light up behind the car as it passes and stay lit.
+                // Distance-based ramp (immune to the 1 s tick): dark ahead, medium behind,
+                // maximum once the car reaches the end of the road.
+                float brightness;
+                if (carX >= roadRight) {
+                    brightness = 1.0f; // finish: every lamp at maximum
+                } else if (carX <= x) {
+                    brightness = 0f;   // still ahead of the car
+                } else {
+                    float passed = (carX - x) / lampSpacing;
+                    brightness = 0.5f * Math.min(1f, passed * 3f);
                 }
 
                 // Lamp color: dark when off, amber when on, green when celebrating

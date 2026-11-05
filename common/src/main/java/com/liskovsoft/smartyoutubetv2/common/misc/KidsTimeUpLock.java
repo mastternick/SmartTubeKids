@@ -469,12 +469,15 @@ public class KidsTimeUpLock {
     }
 
     /**
-     * KIDS v1.9.4: (re)arm the one-shot that fires when the reset window ends.
-     * removeCallbacks first, so arm + every resume cannot stack chains. The boundary is
-     * the CURRENT aligned window's end: when no window is stored yet (fresh install /
-     * right after the daily-reset migration cleared it) the anchor is the window that
-     * contains now, NOT now itself — isWindowExpired treats a 0 start as expired, so a
-     * now-anchor would open the gate at the 1 s clamp instead of at the real boundary.
+     * KIDS v1.9.4–1.9.5: (re)arm the one-shot that fires when the cooldown window ends.
+     * removeCallbacks first, so arm + every resume cannot stack chains.
+     *
+     * KIDS v1.9.5: the boundary is the STORED anchor + interval. The anchor is written at the
+     * exhaustion instant by the controller (cooldown) and again at each rollover, so the gate
+     * opens exactly one interval after the quota ran out. When no anchor is stored yet (fresh
+     * install / migration cleared it), fall back to now: ROLLOVER_MIN_MS then keeps a single
+     * sane wake-up instead of a 1 s loop.
+     *
      * No limit set (timer 0) means there is no gate to open, so nothing is scheduled.
      */
     private static void scheduleRolloverCheck(Context context) {
@@ -495,14 +498,11 @@ public class KidsTimeUpLock {
 
         int intervalMinutes = data.getResetIntervalMinutes();
         long now = System.currentTimeMillis();
-        // Single source of truth for "when does this window end": the ALIGNED grid, the
-        // same authority KidsQuotaWindow.isWindowExpired uses. The stored start can lag
-        // the grid by up to a tickle (~60 s) when a clip crosses a boundary, so
-        // storedStart + intervalMs could land in the past and turn the one-shot into a
-        // 1 s wake loop. windowStartMs(now) + intervalMs is always the real end of the
-        // window containing now, so the repost path re-anchors on a future boundary.
-        long boundaryMs = KidsQuotaWindow.windowStartMs(now, intervalMinutes)
-                + KidsQuotaWindow.intervalMs(intervalMinutes);
+        // KIDS v1.9.5: the anchor IS the cooldown start — written by the controller at the
+        // expiry instant, before this call. Boundary = anchor + interval; no clock grid.
+        long storedStart = data.getWindowStartMs();
+        long anchor = storedStart > 0 ? storedStart : now;
+        long boundaryMs = anchor + KidsQuotaWindow.intervalMs(intervalMinutes);
         long delayMs = Math.max(ROLLOVER_MIN_MS, boundaryMs - now);
 
         Utils.removeCallbacks(sRolloverTask);
@@ -540,7 +540,7 @@ public class KidsTimeUpLock {
             return;
         }
 
-        data.resetWindow(KidsQuotaWindow.windowStartMs(now, intervalMinutes));
+        data.resetWindow(now);
 
         // View cleanup through release(): the mile scene / black screen must go with the gate.
         release(MotherActivity.getResumedActivity());

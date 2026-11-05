@@ -60,6 +60,7 @@ public class KidsModeData {
     private int mResetIntervalMinutes;     // KIDS v1.9.3: how often the quota resets (minutes, see RESET_INTERVAL_MINUTES)
     private int mWarnBeforeMinutes;        // KIDS v1.8: show the countdown badge this many minutes before the limit (0 = off)
     private boolean mUseMileMarker;
+    private boolean mInCooldown; // KIDS v1.9.5: quota exhausted — window re-anchored at expiry, pause until anchor+interval
 
     // Quota counters (persisted so they survive app restarts)
     private long mWindowStartMs;           // epoch ms when the current reset window began
@@ -512,6 +513,36 @@ public class KidsModeData {
         mWindowStartMs = windowStartMs;
         mUsedMs = 0;
         mBonusMs = 0;
+        mInCooldown = false;
+        persistData();
+    }
+
+    public boolean isInCooldown() {
+        return mInCooldown;
+    }
+
+    /**
+     * KIDS v1.9.5: the quota just ran out — re-anchor the window at the expiry instant so the
+     * reset interval becomes a real pause measured from exhaustion, not a clock boundary.
+     * Used stays as-is (exhausted): that is what keeps the gate armed until anchor+interval.
+     */
+    public void anchorCooldown(long expiryMs) {
+        mWindowStartMs = expiryMs;
+        mInCooldown = true;
+        persistData();
+    }
+
+    /**
+     * KIDS v1.9.5: the quota was replenished (extend / bonus / longer timer), so the current
+     * cooldown is no longer a pause at the old anchor. The flag alone is cleared; the anchor
+     * stays, and the controller re-anchors at the NEXT exhaustion instant.
+     */
+    public void clearCooldown() {
+        if (!mInCooldown) {
+            return;
+        }
+
+        mInCooldown = false;
         persistData();
     }
 
@@ -574,6 +605,7 @@ public class KidsModeData {
         mResetIntervalMinutes = sanitize(split, 21, RESET_INTERVAL_MINUTES, DEFAULT_RESET_INTERVAL_MINUTES); // KIDS v1.9.3
         mWarnBeforeMinutes    = sanitize(split, 22, WARN_BEFORE_MINUTES, DEFAULT_WARN_BEFORE_MINUTES);   // KIDS v1.8
         mUseMileMarker        = Helpers.parseBoolean(split, 23, false);
+        mInCooldown           = Helpers.parseBoolean(split, 24, false); // KIDS v1.9.5: in cooldown from exhaustion? (default: no)
     }
 
     /**
@@ -600,6 +632,6 @@ public class KidsModeData {
                         mWindowStartMs, mUsedMs, mBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
-                        mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker));
+                        mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker, mInCooldown));
     }
 }

@@ -1,6 +1,5 @@
 package com.liskovsoft.smartyoutubetv2.common.misc;
 
-import java.util.Calendar;
 import java.util.Locale;
 
 /**
@@ -27,33 +26,6 @@ public final class KidsQuotaWindow {
         return intervalMinutes > 0 ? intervalMinutes * MINUTE_MS : 24 * HOUR_MS;
     }
 
-    /**
-     * Start of the reset window containing nowMs, ALIGNED to the interval instead of counted
-     * from the first watched minute:
-     *  - 24 h (the default) → local midnight, i.e. exactly the reset every earlier build had;
-     *  - 6 h → 00:00 / 06:00 / 12:00 / 18:00;
-     *  - 1 h → the current hour.
-     * Aligning keeps the reset predictable for the parent and independent of when the child
-     * happened to start watching.
-     */
-    public static long windowStartMs(long nowMs, int intervalMinutes) {
-        long startOfDay = startOfDayMs(nowMs);
-
-        return startOfDay + ((nowMs - startOfDay) / intervalMs(intervalMinutes)) * intervalMs(intervalMinutes);
-    }
-
-    /** Local midnight of the day containing nowMs. */
-    public static long startOfDayMs(long nowMs) {
-        Calendar cal = Calendar.getInstance(); // device local timezone
-        cal.setTimeInMillis(nowMs);
-        cal.set(Calendar.HOUR_OF_DAY, 0);
-        cal.set(Calendar.MINUTE, 0);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-
-        return cal.getTimeInMillis();
-    }
-
     public static long limitMs(int timerMinutes, long bonusMs) {
         return (timerMinutes * MINUTE_MS) + bonusMs;
     }
@@ -65,11 +37,14 @@ public final class KidsQuotaWindow {
     /**
      * Must the counters roll over? True when no window is stored yet (fresh install, or a blob
      * written by a build that keyed the window by calendar date — that value parses as 0) and
-     * true whenever the stored boundary is not the one nowMs falls into, which also covers a
-     * clock that jumped backwards.
+     * true once a full interval has elapsed since the stored anchor.
+     *
+     * KIDS v1.9.5: the window is [anchor, anchor + interval) counted FROM the anchor, no clock
+     * grid. The anchor is re-written at rollover AND at quota exhaustion (cooldown), so an
+     * exhausted quota is a real pause: it lasts until anchor + interval, measured from expiry.
      */
     public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalMinutes) {
-        return storedWindowStartMs <= 0 || windowStartMs(nowMs, intervalMinutes) != storedWindowStartMs;
+        return storedWindowStartMs <= 0 || nowMs - storedWindowStartMs >= intervalMs(intervalMinutes);
     }
 
     /**

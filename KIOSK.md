@@ -258,21 +258,34 @@ activity decor (`MileMarkerOverlay`): a dark road with ten **numbered markers
 keys are still swallowed and the PIN dialog still needs 10 escape presses in 10 s.
 The overlay NEVER releases the lock by itself.
 
-**KIDS v1.9.4: quota gate auto-opens at reset boundary.** The quota gate (force stop path) now schedules a
-one-shot task at the end of the current reset window. When the window ends, the fresh quota is written and the
-gate releases **without a PIN** — Back and Home work again. Lock-at-end mode is deliberately excluded: it still
-requires the PIN. The boundary is computed from the clock-aligned grid (same authority as `isWindowExpired`),
-so the gate, the countdown badge and the Mile Marker lamps can never disagree about when the reset happens.
-On a fresh install (no window stored yet) the anchor falls back to the aligned window containing now, so the
-gate waits a full interval instead of opening at the 1 s clamp. The task uses the application context (not the
-Activity, which is destroyed by `forceFinish()`) and is cancelled in `release()` and `releaseStateOnly()` to
-prevent chain stacking.
+**KIDS v1.9.4: quota gate auto-opens at reset boundary; KIDS v1.9.5: that boundary is a real pause.**
+The quota gate (force stop path) schedules a one-shot task at the end of the current reset window. When the
+window ends, the fresh quota is written and the gate releases **without a PIN** — Back and Home work again.
+Lock-at-end mode is deliberately excluded: it still requires the PIN.
+
+KIDS v1.9.5 replaced the clock-aligned grid with **cooldown-from-exhausty** semantics: the moment the quota
+runs out at T, `KidsModeController.anchorCooldownIfNeeded()` re-anchors the window AT T (once per exhaustion,
+tracked by the persisted `inCooldown` flag, blob index 24) so the window is exactly `[T, T + interval)`. The
+pause is therefore a full interval measured from exhaustion, never an instant grid boundary a minute away.
+The rollover — in the controller (`resetWindowIfNeeded`) and in the gate one-shot (`KidsTimeUpLock.scheduleRolloverCheck`)
+— then starts the next window at `now`, and the car plus the gate read the SAME stored anchor: the Mile Marker
+car reaching lamp 10 and the gate opening land on the same instant. The 24 h default still lands on local
+midnight, but only as a coincidence of the very first anchor. When no anchor is stored yet (fresh install) the
+one-shot falls back to `now` and the `ROLLOVER_MIN_MS` clamp keeps a single sane wake-up instead of a 1 s loop.
+The task uses the application context (not the Activity, which is destroyed by `forceFinish()`) and is cancelled
+in `release()` and `releaseStateOnly()` to prevent chain stacking.
+
+A parent extend during a cooldown (bonus minutes via `KidsModeSettingsPresenter` → `setBonusMs`, or a longer
+timer) makes the quota no longer exhausted: `anchorCooldownIfNeeded` then clears the flag (`clearCooldown`)
+without touching the anchor, so the NEXT exhaustion re-anchors at its own instant and the pause is again a
+full interval from that new expiry — never a stale deadline from the first one.
 
 Load-bearing rules (do not "simplify" them away):
 
 - **The lamps show REAL window progress, not a demo animation.** Each 1 s tick
-  recomputes `lit = elapsed · 10 / intervalMs` from the persisted
-  `windowStartMs` / `resetIntervalMinutes` (`KidsQuotaWindow.intervalMs(int minutes)`). Stateless
+  recomputes `progress = elapsed / interval` from the persisted cooldown anchor
+  (`windowStartMs` — written at expiry, not at grid boundaries). The car traverses
+  the road over the full cooldown interval, and lamps light up behind it. Stateless
   by design: a process death or re-arm inherits nothing, and opening the scene
   after the window already rolled shows all lamps lit without re-firing the
   green celebration.

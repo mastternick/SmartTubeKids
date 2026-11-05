@@ -449,7 +449,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         }
 
         resetWindowIfNeeded();
-
+        // KIDS v1.9.5: roll first (a finished pause must zero the counters), then anchor a
+        // fresh exhaustion — order matters, otherwise the new anchor is immediately expired.
+        anchorCooldownIfNeeded();
         return mKidsData.getUsedMs() >= getLimitMs();
     }
 
@@ -483,7 +485,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     }
 
     private long getWindowStartMs(long nowMs) {
-        return KidsQuotaWindow.windowStartMs(nowMs, mKidsData.getResetIntervalMinutes());
+        // KIDS v1.9.5: the stored window start IS the anchor (cooldown start when the quota
+        // ran out). No clock grid: counting never reaches back before the anchor.
+        return mKidsData.getWindowStartMs();
     }
 
     private void stopCounting() {
@@ -515,9 +519,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     }
 
     /**
-     * KIDS v1.8: roll the counters over when the reset window moved on. Boundaries are ALIGNED to
-     * the interval (see KidsQuotaWindow.windowStartMs), so the 24 h default keeps resetting at
-     * local midnight exactly like every earlier build did.
+     * KIDS v1.8: roll the counters over when the reset window moved on.
+     *
+     * KIDS v1.9.5: the window is [anchor, anchor + interval) counted from the stored anchor,
+     * not from a clock grid — the anchor written here is {@code now}, so a window that follows
+     * a cooldown starts exactly when the pause ends. The 24 h default lands on midnight only as
+     * a coincidence of the very first anchor.
      */
     private void resetWindowIfNeeded() {
         long now = System.currentTimeMillis();
@@ -527,10 +534,40 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return;
         }
 
-        mKidsData.resetWindow(KidsQuotaWindow.windowStartMs(now, intervalMinutes));
+        mKidsData.resetWindow(now);
         resetWarnings();
         // KIDS: a fresh window means a fresh quota — never keep the child locked past the reset
         KidsTimeUpLock.releaseStateOnly();
+    }
+
+    /**
+     * KIDS v1.9.5: at the moment the quota becomes exhausted, re-anchor the reset window to
+     * now, so the pause is exactly one interval measured from exhaustion. Anchored ONCE per
+     * exhaustion (mInCooldown): without the flag every tickle would push the deadline out.
+     * The flag is cleared on the way back out of exhaustion (below), so a parent extend
+     * (setBonusMs) or a longer timer re-arms the anchor for the NEXT crossing — otherwise a
+     * replenished quota would exhaust again against the stale first anchor and the pause
+     * would end at the old deadline instead of one fresh interval from the new expiry.
+     * resetWindow (natural rollover) clears the flag too, covering the idle case.
+     */
+    private void anchorCooldownIfNeeded() {
+        if (mKidsData == null) {
+            return;
+        }
+
+        long limitMs = getLimitMs();
+
+        if (limitMs <= 0 || mKidsData.getUsedMs() < limitMs) {
+            if (mKidsData.isInCooldown()) {
+                mKidsData.clearCooldown(); // quota replenished (extend/bonus/bigger timer):
+                                           // a future exhaustion must anchor afresh
+            }
+            return;
+        }
+
+        if (!mKidsData.isInCooldown()) {
+            mKidsData.anchorCooldown(System.currentTimeMillis());
+        }
     }
 
     private void checkWarnings() {
