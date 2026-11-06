@@ -25,8 +25,8 @@ import java.lang.ref.WeakReference;
  * and only the correct Kids Mode PIN removes it.
  *
  * The PIN dialog is NOT shown before the child earned it: an escape key must be
- * pressed {@link KidsTimeUpKeyGate#REQUIRED_PRESSES} times within
- * {@link KidsTimeUpKeyGate#WINDOW_MS} (see KidsTimeUpKeyGate). One stray BACK used to
+ * pressed {@link KidsTimeUpKeyGate#REQUIRED_PRESSES} times, each within
+ * {@link KidsTimeUpKeyGate#GAP_MAX_MS} of the previous press (see KidsTimeUpKeyGate). One stray BACK used to
  * pop the PIN prompt outright, which is exactly the thing the gate is meant to hide.
  *
  * The state is in-memory only (never persisted) on purpose: a locked screen must
@@ -325,6 +325,23 @@ public class KidsTimeUpLock {
             return; // below the threshold: NOTHING shows, the screen stays black
         }
 
+        // KIDS v1.9.6: only the QUOTA time-up screen honours the opt-out — a Lock-at-end
+        // lock keeps requiring the PIN (the switch text promises the time limit only).
+        if (sQuotaGate && !data.isPinRequiredAfterMash()) {
+            // Kiosk still wins: never open the app without the PIN when the key guard is on.
+            if (KioskModeManager.isKioskEnabled(activity)) {
+                Log.d(TAG, "Kiosk enabled: PIN still required to leave the time-up screen");
+            } else {
+                // Deliberately NO KidsPinGate.unlock() here: that opens a 10-minute parent
+                // session which skips the PIN for the Kids Mode settings dialog, so ten
+                // mashed BACK presses would let a child switch Kids Mode / the timer / the
+                // PIN off. The presses only drop the time-up screen, nothing else.
+                release(activity);
+                Log.d(TAG, "Mash complete and PIN not required: time-up gate released");
+                return;
+            }
+        }
+
         if (activity.isFinishing() || activity.isDestroyed()) {
             // No window to host the dialog: leave the gate armed (the mash is not lost) and
             // do NOT burn the throttle — the next usable activity consumes it (applyOnResume).
@@ -537,6 +554,16 @@ public class KidsTimeUpLock {
 
         if (!KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes)) {
             scheduleRolloverCheck(context); // boundary moved: wait for the real one
+            return;
+        }
+
+        // KIDS v1.9.6: with kiosk enabled the gate never opens by itself — the parent must
+        // enter the PIN. The window is deliberately NOT re-anchored here: doing so would
+        // restart the Mile Marker car every interval while the screen stays locked. The
+        // controller rolls the window on the next play (resetWindowIfNeeded), so nothing is
+        // left insta-locked once the PIN is entered. The one-shot is not rescheduled.
+        if (KioskModeManager.isKioskEnabled(context)) {
+            Log.d(TAG, "Kiosk enabled: gate stays locked after reset, PIN required");
             return;
         }
 

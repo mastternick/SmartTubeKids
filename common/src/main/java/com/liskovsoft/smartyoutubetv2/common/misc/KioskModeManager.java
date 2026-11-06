@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager; // KIDS v1.9.6: key guard self-heal permission check
 import android.net.Uri; // KIDS v1.7.2: App info deep link (restricted-settings guidance)
 import android.os.Build;
 import android.provider.Settings; // KIDS v1.6: key guard setup / status
@@ -117,6 +118,7 @@ public class KioskModeManager {
     private static WeakReference<Activity> sPinnedActivity; // KIDS v1.2.8: the task we pinned ourselves
     private static boolean sKeyGuardHintShown; // KIDS v1.6: one key-guard hint per process
     private static long sLastBringBackMs; // KIDS v1.6: key-guard climb-back throttle
+    private static long sLastKeyGuardSelfHealMs; // KIDS v1.9.6: throttle for the boot/resume re-apply
     // KIDS v1.7.2: the parent was just sent to the Accessibility screen. Android 13+
     // silently reverts the toggle for apps installed outside the Play Store
     // ("restricted settings") — the switch ticks itself on, then off again. The
@@ -228,6 +230,70 @@ public class KioskModeManager {
         }
 
         return false;
+    }
+
+    /**
+     * KIDS v1.9.6: re-enable our own accessibility guard after a reboot.
+     *
+     * Android 13+ re-filters a sideloaded package's accessibility services at boot while the
+     * package carries ACCESS_RESTRICTED_SETTINGS: deny, which rewrites
+     * enabled_accessibility_services to null — the guard silently disappears. When the parent
+     * has granted WRITE_SECURE_SETTINGS once over ADB, we can put our component back ourselves
+     * (appending, never replacing, other enabled services).
+     *
+     * Does nothing when: kiosk is off, the guard is already enabled, the throttle window is
+     * open, or the permission was never granted (the caller then guides the parent instead).
+     *
+     * @return true when this call actually (re)wrote the setting.
+     */
+    public static boolean trySelfHealKeyGuard(Context context) {
+        try {
+            if (context == null || !isKioskEnabled(context) || isKeyGuardEnabled(context)) {
+                return false;
+            }
+
+            long now = System.currentTimeMillis();
+
+            if (now - sLastKeyGuardSelfHealMs < 30_000L) {
+                return false;
+            }
+
+            // PackageManager.checkPermission is API 1; Context.checkSelfPermission is API 23
+            // and minSdk is 17 (lint NewApi would fail the build).
+            if (context.getPackageManager().checkPermission(
+                    "android.permission.WRITE_SECURE_SETTINGS", context.getPackageName())
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Key guard self-heal skipped: WRITE_SECURE_SETTINGS not granted");
+                return false;
+            }
+
+            sLastKeyGuardSelfHealMs = now;
+
+            String target = new ComponentName(context, KioskKeyGuardService.class).flattenToString();
+            String current = Settings.Secure.getString(context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            String value;
+
+            if (current == null || current.isEmpty() || "null".equals(current)) {
+                value = target;
+            } else if (current.contains(target)) {
+                return false; // already there (raced with a manual toggle)
+            } else {
+                value = current + ":" + target; // append: never drop other services
+            }
+
+            Settings.Secure.putString(context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, value);
+            // Literal: Settings.Secure.ACCESSIBILITY_ENABLED is @hide in the public stubs
+            // (same reason KioskModeManager already uses literals for hidden settings).
+            Settings.Secure.putInt(context.getContentResolver(), "accessibility_enabled", 1);
+
+            Log.d(TAG, "Key guard self-healed after boot/resume: %s", value);
+            return true;
+        } catch (Throwable e) {
+            Log.e(TAG, e);
+            return false;
+        }
     }
 
     /**
@@ -464,6 +530,7 @@ public class KioskModeManager {
                     sSetupGraceUntilMs = 0; // Setup return: end setup grace specifically, preserving any exit grace
                 }
 
+                trySelfHealKeyGuard(activity); // KIDS v1.9.6: repairs a guard lost at boot / re-enabled kiosk
                 autoLockIfNeeded(activity); // KIDS v1.2.8: also without DO = screen pinning (HOME blocked); cross-task fixed by releaseForNavigation()
                 hintKeyGuardIfNeeded(activity); // KIDS v1.6: point the parent to the full block
                 checkKeyGuardSetupResult(activity); // KIDS v1.7.2: back from the Accessibility screen — did the toggle stick?
@@ -729,7 +796,18 @@ public class KioskModeManager {
      */
     public static void onDeviceBooted(Context context) {
         try {
-            if (!isKioskEnabled(context) || !KidsModeData.instance(context).isRelockOnBoot()) {
+            if (!isKioskEnabled(context)) {
+                return;
+            }
+
+            // KIDS v1.9.6: Android 13+ rewrites enabled_accessibility_services to null for a
+            // restricted sideloaded package at every boot. Repair it BEFORE the relock check:
+            // relock-on-boot defaults to OFF, so gating the repair on it would leave a default
+            // install with a dead guard until someone opens the app by hand. Safe while a
+            // parent exit is in effect: isKeyGuardActive is false then, so nothing is swallowed.
+            trySelfHealKeyGuard(context);
+
+            if (!KidsModeData.instance(context).isRelockOnBoot()) {
                 return;
             }
 
@@ -898,7 +976,7 @@ public class KioskModeManager {
         // The long-text category renders as a row that opens the explanation (TV
         // preference UI), so it gets its own label instead of repeating the title.
         dialog.appendLongTextCategory(activity.getString(R.string.kids_kiosk_key_guard_blocked_why),
-                UiOptionItem.from(activity.getString(R.string.kids_kiosk_key_guard_blocked_text)));
+                UiOptionItem.from(activity.getString(R.string.kids_kiosk_key_guard_adb_text)));
 
         List<OptionItem> options = new ArrayList<>();
 

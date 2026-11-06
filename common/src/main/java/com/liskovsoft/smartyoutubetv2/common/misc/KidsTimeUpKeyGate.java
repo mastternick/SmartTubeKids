@@ -7,7 +7,8 @@ package com.liskovsoft.smartyoutubetv2.common.misc;
  * hands the child the PIN prompt for free: one accidental BACK shows the very thing
  * that is supposed to keep them out. Since this gate the screen stays black and
  * completely silent until an escape key has been pressed {@link #REQUIRED_PRESSES}
- * times inside {@link #WINDOW_MS}; only then does the PIN dialog appear.
+ * times with each press within {@link #GAP_MAX_MS} of the previous one; only then does the
+ * PIN dialog appear.
  *
  * Counted presses are escape attempts only (BACK / HOME / RECENTS / ESCAPE —
  * {@link #isEscapeKey}). Navigation keys are still swallowed, they just never reveal
@@ -29,8 +30,16 @@ public final class KidsTimeUpKeyGate {
     /** Distinct escape presses needed before the PIN dialog is allowed to appear. */
     public static final int REQUIRED_PRESSES = 10;
 
-    /** Press 1 and press {@link #REQUIRED_PRESSES} must be at most this far apart. */
-    public static final long WINDOW_MS = 10_000L;
+    /**
+     * Press i+1 must follow press i within this gap (KIDS v1.9.6).
+     *
+     * This is the ONLY timing rule, and it is deliberately per-gap rather than a window
+     * measured from the first press: a total-time bound of 2 s for all ten presses would be
+     * impossible on a TV remote, and a 10 s total bound would silently reject a perfectly
+     * steady 1.5 s mash (9 gaps = 13.5 s). "Keep pressing, no pause longer than 2 s" is what
+     * a parent actually does, so that is what the gate enforces.
+     */
+    public static final long GAP_MAX_MS = 2_000L;
 
     // Literals on purpose: this file must stay free of Android imports so the counting
     // rule is testable with plain javac/java (no SDK, no gradle — see BUILD-POLICY.md).
@@ -40,7 +49,7 @@ public final class KidsTimeUpKeyGate {
     private static final int KEYCODE_APP_SWITCH = 187;   // KeyEvent.KEYCODE_APP_SWITCH (RECENTS)
 
     private static int sCount;
-    private static long sFirstPressMs;
+    private static long sLastPressMs;
     // Threshold reached. Sticky: it survives a caller that could not open the dialog
     // (no resumed activity, dialog throttled) so the escape attempt is never lost and
     // the next press does show the PIN. Cleared by resetSequence().
@@ -64,21 +73,21 @@ public final class KidsTimeUpKeyGate {
             return true; // still waiting for a caller that can show the dialog
         }
 
-        // First press of a sequence, or the previous one went stale: start over. The
-        // window is measured from the FIRST press, so "10 presses in 10 s" holds even
-        // for a slow, steady mash.
-        if (sCount == 0 || nowMs - sFirstPressMs > WINDOW_MS) {
+        // First press of a sequence, or the previous one went stale: start over. A press
+        // arriving later than GAP_MAX_MS after the previous one restarts the sequence, so a
+        // child pressing once every few seconds can never accumulate a count.
+        if (sCount == 0 || nowMs - sLastPressMs > GAP_MAX_MS) {
             sCount = 1;
-            sFirstPressMs = nowMs;
+            sLastPressMs = nowMs;
             return false;
         }
 
+        sLastPressMs = nowMs;
         sCount++;
 
         if (sCount >= REQUIRED_PRESSES) {
             sArmed = true;
             sCount = 0;
-            sFirstPressMs = 0;
             return true;
         }
 
@@ -100,7 +109,7 @@ public final class KidsTimeUpKeyGate {
     public static void resetSequence() {
         sArmed = false;
         sCount = 0;
-        sFirstPressMs = 0;
+        sLastPressMs = 0;
     }
 
     /**

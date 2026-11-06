@@ -61,6 +61,7 @@ public class KidsModeData {
     private int mWarnBeforeMinutes;        // KIDS v1.8: show the countdown badge this many minutes before the limit (0 = off)
     private boolean mUseMileMarker;
     private boolean mInCooldown; // KIDS v1.9.5: quota exhausted — window re-anchored at expiry, pause until anchor+interval
+    private boolean mPinRequiredAfterMash;
 
     // Quota counters (persisted so they survive app restarts)
     private long mWindowStartMs;           // epoch ms when the current reset window began
@@ -168,6 +169,20 @@ public class KidsModeData {
             KidsTimeUpLock.invalidateGateAuthorization();
         }
         mUseMileMarker = useMileMarker;
+        persistData();
+    }
+
+    // --- PIN after the 10-press mash (KIDS v1.9.6) ---
+
+    public boolean isPinRequiredAfterMash() {
+        return mPinRequiredAfterMash;
+    }
+
+    public void setPinRequiredAfterMash(boolean required) {
+        if (mPinRequiredAfterMash != required) {
+            KidsTimeUpLock.invalidateGateAuthorization();
+        }
+        mPinRequiredAfterMash = required;
         persistData();
     }
 
@@ -606,6 +621,7 @@ public class KidsModeData {
         mWarnBeforeMinutes    = sanitize(split, 22, WARN_BEFORE_MINUTES, DEFAULT_WARN_BEFORE_MINUTES);   // KIDS v1.8
         mUseMileMarker        = Helpers.parseBoolean(split, 23, false);
         mInCooldown           = Helpers.parseBoolean(split, 24, false); // KIDS v1.9.5: in cooldown from exhaustion? (default: no)
+        mPinRequiredAfterMash = Helpers.parseBoolean(split, 25, true); // KIDS v1.9.6: PIN after 10-press mash (default: yes)
     }
 
     /**
@@ -632,6 +648,7 @@ public class KidsModeData {
                         mWindowStartMs, mUsedMs, mBonusMs, mIsPinEnabled, mBrightnessPercent,
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
-                        mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker, mInCooldown));
+                        mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker, mInCooldown,
+                        mPinRequiredAfterMash));
     }
 }

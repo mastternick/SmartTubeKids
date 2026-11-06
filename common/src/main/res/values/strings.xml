@@ -772,6 +772,8 @@
     <string name="kids_reset_interval">Reset interval</string>
     <string name="kids_mile_marker_title">Mile Marker Mode</string>
     <string name="kids_mile_marker_desc">When time is up, a little car drives along the night road. As the reset window elapses, the lamps light up one by one. When the car reaches lamp 10 the reset is complete.</string>
+    <string name="kids_mash_pin_title">Ask for the PIN after 10 presses</string>
+    <string name="kids_mash_pin_desc">When the time limit is used up, 10 quick BACK presses open the PIN prompt. Turn this off to let those 10 presses exit the time-up screen directly. Kiosk mode always requires the PIN.</string>
     <string name="kids_countdown_warning">Remaining-time countdown</string>
     <string name="kids_countdown_off">Off</string>
     <string name="kids_calm_exit">Calm exit warnings</string>
@@ -821,7 +823,7 @@
     <string name="kids_kiosk_key_guard_failed">Could not open Accessibility settings. Open Settings → Accessibility manually and enable "SmartTube Kids kiosk key guard".</string>
     <string name="kids_kiosk_key_guard_blocked_title">Kiosk key guard is not enabled</string>
     <string name="kids_kiosk_key_guard_blocked_why">Fix now: App info → \u22ee → Allow restricted settings</string>
-    <string name="kids_kiosk_key_guard_blocked_text">Android turned the switch back off on its own — restricted settings on Android 13+ may be preventing the sideloaded service from activating until allowed. The app cannot reactivate it automatically. To resolve it:\n1. Open App info (or Settings → Apps → SmartTube Kids).\n2. Open the \u22ee menu and choose "Allow restricted settings".\n3. Come back and enable "SmartTube Kids kiosk key guard" in Accessibility again.\nIf the TV has no such menu, use the app-op and ADB instructions in KIOSK.md to allow restricted settings and add the service without replacing other accessibility services. If the switch reverts again later (for example after an app update), repeat the App info step.</string>
+    <string name="kids_kiosk_key_guard_adb_text">The guard disappeared after a reboot. Android 13+ re-blocks accessibility for apps installed outside the Play Store, and it undoes the setting every time the TV starts.\n\nOne-time fix over ADB (from a computer on the same network):\n1. adb connect &lt;TV_IP&gt;:5555\n2. adb shell appops set app.smarttubekids ACCESS_RESTRICTED_SETTINGS allow\n3. adb shell pm grant app.smarttubekids android.permission.WRITE_SECURE_SETTINGS\n\nStep 2 removes the Android restriction for good. Step 3 lets this app put its own guard back by itself after every reboot - after that you never have to touch Accessibility again.\n\nIf the TV has no menu to allow restricted settings, these commands are the only route. Other build flavours use app.smarttubekids.stable or app.smarttubekids.fdroid.</string>
     <string name="kids_kiosk_open_app_info">Open App info (Allow restricted settings)</string>
     <string name="kids_kiosk_retry_accessibility">Open Accessibility again</string>
     <string name="kids_kiosk_open_app_info_failed">Could not open App info. Open Settings → Apps → SmartTube Kids manually.</string>

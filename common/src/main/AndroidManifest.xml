@@ -25,6 +25,10 @@
     <!-- Starting targetSDK 33+, foreground services require explicit permissions in the manifest. -->
     <!-- NOTE: only works with 'mediaPlayback' type service. Others types will fail. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- KIDS v1.9.6: lets the app keep its own accessibility guard enabled across reboots.
+         Granted once over ADB: adb shell pm grant <pkg> android.permission.WRITE_SECURE_SETTINGS -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <queries>
         <!-- Android 11+: access package info (works only for specified apps) -->

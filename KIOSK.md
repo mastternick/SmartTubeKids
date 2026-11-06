@@ -255,7 +255,8 @@ When the parent enables **Mile Marker Mode** in Kids Mode settings, the time-up
 black screen (force stop path) is replaced by a night-road scene drawn on the
 activity decor (`MileMarkerOverlay`): a dark road with ten **numbered markers
 (1–10)**, each flanked by street-light poles. Nothing about the gate changes —
-keys are still swallowed and the PIN dialog still needs 10 escape presses in 10 s.
+keys are still swallowed and the PIN dialog still needs 10 escape presses, each within
+2 s of the previous one.
 The overlay NEVER releases the lock by itself.
 
 **KIDS v1.9.4: quota gate auto-opens at reset boundary; KIDS v1.9.5: that boundary is a real pause.**
@@ -312,6 +313,75 @@ The same release expands the reset-interval options to
 anything outside the set sanitizes back to 1440). The stored unit switched from hours to minutes
 with a one-time migration (`KidsMigration.migrateResetIntervalUnit`), and the settings UI shows
 values ≥ 60 as hours, values < 60 as minutes.
+
+## Time-up screen: PIN or straight out (KIDS v1.9.6)
+
+When the watch limit runs out the screen is a gate: every key is swallowed and nothing is
+shown. Ten quick escape presses earn the way out. Two things are configurable.
+
+### Ask for the PIN after 10 presses (`Ask for the PIN after 10 presses`, default ON)
+
+- **ON (default):** the ten presses open the PIN dialog. Only the correct PIN releases the
+  gate — same behaviour as every earlier build.
+- **OFF:** the ten presses release the gate directly, no dialog. The presses themselves are
+  the proof that a grown-up is there.
+
+**Kiosk mode always wins.** With kiosk enabled the PIN is required in both cases: the gate
+never opens the app without it. Turning the switch off only ever affects a device with kiosk
+disabled.
+
+The same rule applies to the automatic release: when the reset window ends, the gate opens
+by itself **only if kiosk is off**. With kiosk on, the reset still replenishes the quota (so
+the next clip is not insta-locked) but the screen stays behind the PIN.
+
+### What counts as "10 quick presses"
+
+One bound (`KidsTimeUpKeyGate.GAP_MAX_MS`): **each press within 2 s of the previous one**
+(KIDS v1.9.6). Ten presses at 1.5 s intervals count (9 gaps = 13.5 s total); a press that
+arrives more than 2 s after the previous one restarts the sequence, so a child pressing once
+every few seconds can never accumulate a count.
+
+The earlier build also required all ten presses inside 10 s measured from the first one. That
+outer bound is gone: it silently rejected a steady 1.5 s mash and made the real requirement
+much stricter than "no pause longer than 2 s".
+
+Counted keys stay BACK / HOME / RECENTS / ESCAPE. The mic / assistant keys are never counted.
+
+## Kiosk key guard after a reboot (KIDS v1.9.6)
+
+**Symptom:** the guard worked once, the TV was restarted, and now the Accessibility switch
+ticks itself back off — it cannot be enabled at all.
+
+**Cause (platform, not an app bug):** on Android 13+ a package installed outside the Play Store
+carries `ACCESS_RESTRICTED_SETTINGS: deny`. AccessibilityManagerService re-filters such a
+package at every boot and rewrites `enabled_accessibility_services` to null, so a guard that
+was written with `settings put` is silently undone by the next restart.
+
+**Durable fix, once, over ADB:**
+
+```bash
+PKG="app.smarttubekids" # or app.smarttubekids.stable / app.smarttubekids.fdroid
+adb shell appops set "$PKG" ACCESS_RESTRICTED_SETTINGS allow
+adb shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS
+adb shell settings put secure enabled_accessibility_services "$PKG/com.liskovsoft.smartyoutubetv2.common.misc.KioskKeyGuardService"
+adb shell settings put secure accessibility_enabled 1
+adb shell settings get secure enabled_accessibility_services   # must print the component, not null
+```
+
+- The **app-op** is the part that survives reboots and app updates; without it every other
+  command is undone at the next start. Lowercase `access_restricted_settings` fails with
+  `Unknown operation string` — the name is case-sensitive.
+- The **`pm grant`** is optional but recommended: with it the app re-enables its own guard at
+  boot (`KioskModeManager.trySelfHealKeyGuard`, called from `onDeviceBooted` and
+  `applyOnResume`), appending its component to whatever else is enabled — never replacing it.
+  Without it the guard must be re-ticked manually after every reboot, and the app can only
+  show the guidance dialog.
+- A sideloaded **update** can re-arm the restriction; re-check with
+  `adb shell appops get "$PKG" ACCESS_RESTRICTED_SETTINGS` if the switch starts reverting again.
+
+Verify binding and function separately: `adb shell dumpsys accessibility | grep -A5 KioskKeyGuardService`
+(bound, with `CAN_REQUEST_FILTER_KEY_EVENTS`) and then press HOME **on the physical remote** —
+`adb shell input keyevent` bypasses the accessibility input filter and proves nothing.
 
 ## Exiting kiosk
 

@@ -144,7 +144,8 @@ public class MotherActivity extends FragmentActivity {
         // KIDS: force stop — the time-up screen is a GATE, not a transition. EVERY key
         // event is consumed (DOWN and UP: BACK fires onBackPressed from the UP event, so
         // swallowing only DOWN would let the child leave). Nothing is shown: the PIN
-        // dialog appears only after 10 escape-key presses in 10 s (KidsTimeUpKeyGate).
+        // dialog appears only after 10 escape-key presses, each within 2 s of the previous
+        // one (KidsTimeUpKeyGate).
         if (KidsTimeUpLock.isLocked()) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 KidsTimeUpLock.onKeyPress(this, event);

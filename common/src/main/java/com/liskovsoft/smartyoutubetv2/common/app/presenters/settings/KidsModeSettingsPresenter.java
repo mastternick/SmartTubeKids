@@ -148,6 +148,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
+        appendMashPinSwitch(settingsPresenter);
         appendMileMarkerSwitch(settingsPresenter);
         appendResetIntervalCategory(settingsPresenter); // KIDS v1.8: how often the watch limit resets
         appendCalmExitSwitch(settingsPresenter);
@@ -404,6 +405,14 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
                 getContext().getString(R.string.kids_mile_marker_desc),
                 option -> mKidsData.setUseMileMarker(option.isSelected()),
                 mKidsData.isUseMileMarker()));
+    }
+
+    private void appendMashPinSwitch(AppDialogPresenter settingsPresenter) {
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.kids_mash_pin_title),
+                getContext().getString(R.string.kids_mash_pin_desc),
+                option -> mKidsData.setPinRequiredAfterMash(option.isSelected()),
+                mKidsData.isPinRequiredAfterMash()));
     }
 
     /**
