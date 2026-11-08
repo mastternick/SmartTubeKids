@@ -3,6 +3,7 @@ package com.liskovsoft.smartyoutubetv2.common.prefs;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import com.liskovsoft.sharedutils.helpers.Helpers;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsQuotaWindow;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
 
 import java.util.ArrayList;
@@ -155,6 +156,7 @@ public class KidsModeData {
 
     public void setTimerMinutes(int minutes) {
         mTimerMinutes = minutes;
+        applyParentTimeChange(0);
         persistData();
     }
 
@@ -189,10 +191,14 @@ public class KidsModeData {
     // --- Reset interval (KIDS v1.9.3: minutes; migrated from hours) ---
 
     /**
-     * KIDS v1.9.3: how often the watch quota resets, in minutes. The parent picks one of
+     * KIDS v1.9.3: length of the reset pause, in minutes. The parent picks one of
      * {@link #RESET_INTERVAL_MINUTES}; anything else (e.g. a hand-edited blob) is returned
-     * as stored so the caller can decide. The window itself is anchored at
-     * {@link #getWindowStartMs()} and rolled over by KidsModeController, never here.
+     * as stored so the caller can decide. KIDS v1.9.7: this is NOT "how often the quota
+     * resets" — the quota is never replenished by the clock while it is unspent. The interval is
+     * the pause length, measured from the moment the watch limit is reached. This class stores an
+     * anchor at exhaustion ({@code anchorCooldown}, together with the flag) and at rollover
+     * ({@code resetWindow}, without it), plus the catch-up rollover in the setters; only the
+     * exhaustion anchor is a pause boundary, and the flag is what distinguishes them.
      */
     public int getResetIntervalMinutes() {
         return mResetIntervalMinutes;
@@ -580,8 +586,41 @@ public class KidsModeData {
     }
 
     public void setBonusMs(long ms) {
+        long granted = ms - mBonusMs; // only THIS call's grant may survive a rollover
         mBonusMs = ms;
+        applyParentTimeChange(granted);
         persistData();
+    }
+
+    /**
+     * KIDS v1.9.7: a parent time change can only affect the RUNNING pause if one is anchored.
+     * - pause already over: full rollover right here (used = 0, bonus = 0, anchor = now, flag
+     *   cleared) and then ONLY the grant this call just made is re-applied — an older bonus was
+     *   spent by definition, since exhaustion means used >= timer + bonus, and `used` can even
+     *   overtake the limit (a clip runs to its end with force stop off, or the PIN gate session
+     *   suspends the hard stop), which is why this must be tested BEFORE any "is the quota
+     *   replenished" test: a grant smaller than the overrun would otherwise be lost when
+     *   resetWindow() zeroes the bonus;
+     * - pause still running and the quota became unspent: only the flag is cleared; the spent
+     *   budget and the anchor stay, and the NEXT exhaustion re-anchors there;
+     * - pause still running and the quota still exhausted (e.g. the timer was lowered): untouched.
+     * The caller persists: one synchronous file write.
+     */
+    private void applyParentTimeChange(long grantedBonusMs) {
+        if (!mInCooldown) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+
+        if (KidsQuotaWindow.isPauseElapsed(mWindowStartMs, now, mResetIntervalMinutes)) {
+            mWindowStartMs = now;
+            mUsedMs = 0;
+            mBonusMs = Math.max(0, grantedBonusMs);
+            mInCooldown = false;
+        } else if (mUsedMs < KidsQuotaWindow.limitMs(mTimerMinutes, mBonusMs)) {
+            mInCooldown = false;
+        }
     }
 
     // --- Persistence (same pattern as SearchData) ---

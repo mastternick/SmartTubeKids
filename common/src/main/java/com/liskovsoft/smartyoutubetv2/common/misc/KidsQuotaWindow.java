@@ -35,16 +35,47 @@ public final class KidsQuotaWindow {
     }
 
     /**
-     * Must the counters roll over? True when no window is stored yet (fresh install, or a blob
-     * written by a build that keyed the window by calendar date — that value parses as 0) and
-     * true once a full interval has elapsed since the stored anchor.
+     * Must the counters roll over? True when there is nothing to roll over (no quota set, or no
+     * anchor stored yet: fresh install, or a blob written by a build that keyed the window by
+     * calendar date — that value parses as 0).
      *
-     * KIDS v1.9.5: the window is [anchor, anchor + interval) counted FROM the anchor, no clock
-     * grid. The anchor is re-written at rollover AND at quota exhaustion (cooldown), so an
-     * exhausted quota is a real pause: it lasts until anchor + interval, measured from expiry.
+     * KIDS v1.9.7: the reset interval is a PAUSE, not a rolling window. The pause
+     * [anchor, anchor + interval) only exists AFTER the quota has been exhausted: an anchor with
+     * usedMs < limitMs is meaningless, because no pause is running and there is no boundary to
+     * wait for. So while the quota is not yet reached the answer is always false — the watch
+     * budget is spent down across sessions until it is used up instead of being replenished by
+     * the clock. The anchor is re-written at exhaustion by KidsModeController (once per
+     * exhaustion), so the pause runs exactly one interval measured from that instant and the
+     * rollover (used = 0, bonus = 0, fresh anchor) happens at anchor + interval.
+     *
+     * KIDS v1.9.7: the stored anchor is only a pause boundary while the {@code inCooldown} flag
+     * says the pause was anchored AT exhaustion. Elapsed time alone proves nothing: an anchor
+     * without the flag — the parent lowered the timer below the already-counted usedMs, or the
+     * process died between the counter save and the anchor save in
+     * KidsModeController.accumulatePlayTime — is not a boundary, so no rollover happens and the
+     * false "fresh quota" never appears. KidsModeController.anchorCooldownIfNeeded() writes a
+     * proper pause anchor on the next check instead.
      */
-    public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalMinutes) {
-        return storedWindowStartMs <= 0 || nowMs - storedWindowStartMs >= intervalMs(intervalMinutes);
+    public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalMinutes,
+                                          long usedMs, long limitMs, boolean inCooldown) {
+        if (limitMs <= 0 || storedWindowStartMs <= 0) {
+            return true; // no quota / no anchor: nothing to wait for, start fresh
+        }
+
+        if (!inCooldown || usedMs < limitMs) {
+            return false; // no pause anchored at exhaustion — never replenish
+        }
+
+        return isPauseElapsed(storedWindowStartMs, nowMs, intervalMinutes);
+    }
+
+    /**
+     * True once one interval has elapsed since the given pause anchor — the raw clock test,
+     * without the "is a pause running" conditions of {@link #isWindowExpired}. Anchor 0 (nothing
+     * stored) is never a boundary.
+     */
+    public static boolean isPauseElapsed(long pauseAnchorMs, long nowMs, int intervalMinutes) {
+        return pauseAnchorMs > 0 && nowMs - pauseAnchorMs >= intervalMs(intervalMinutes);
     }
 
     /**

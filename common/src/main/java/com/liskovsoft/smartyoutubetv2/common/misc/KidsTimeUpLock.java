@@ -165,7 +165,7 @@ public class KidsTimeUpLock {
         return data.isEnabled() && data.isPinEnabled();
     }
 
-    /** Persisted quota is used up (a window that already moved on counts as fresh). */
+    /** Persisted quota is used up (a window whose pause has run out counts as fresh). */
     private static boolean isQuotaExhausted(Context context) {
         if (context == null) {
             return false;
@@ -177,10 +177,14 @@ public class KidsTimeUpLock {
             return false;
         }
 
+        long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
+        // KIDS v1.9.7: only an exhausted quota with a pause anchored at exhaustion can be reset
+        // by the clock, so a stored anchor without the inCooldown flag (parent lowered the timer,
+        // or a crash between the counter and anchor saves) is not "expired" — the budget stays spent.
         long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
-                data.getResetIntervalMinutes()) ? 0 : data.getUsedMs();
+                data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown()) ? 0 : data.getUsedMs();
 
-        return usedMs >= KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
+        return usedMs >= limitMs;
     }
 
     /** KIDS v1.7.5: the parent offered the end-of-video lock AND the player is in that mode. */
@@ -486,14 +490,22 @@ public class KidsTimeUpLock {
     }
 
     /**
-     * KIDS v1.9.4–1.9.5: (re)arm the one-shot that fires when the cooldown window ends.
+     * KIDS v1.9.4–1.9.5: (re)arm the one-shot that fires when the cooldown pause ends.
      * removeCallbacks first, so arm + every resume cannot stack chains.
      *
-     * KIDS v1.9.5: the boundary is the STORED anchor + interval. The anchor is written at the
-     * exhaustion instant by the controller (cooldown) and again at each rollover, so the gate
-     * opens exactly one interval after the quota ran out. When no anchor is stored yet (fresh
-     * install / migration cleared it), fall back to now: ROLLOVER_MIN_MS then keeps a single
-     * sane wake-up instead of a 1 s loop.
+     * KIDS v1.9.5: the boundary is the STORED anchor + interval. Here that anchor is always the
+     * exhaustion anchor written by {@link KidsModeData#anchorCooldown(long)} (the early return
+     * in the body below requires an exhausted quota WITH the flag), so the gate opens exactly
+     * one interval after the quota ran out. A hand-edited or corrupted blob with a 0 anchor still
+     * recovers: the ROLLOVER_MIN_MS clamp fires the one-shot and {@link #onRolloverCheck()} treats
+     * anchor 0 as expired.
+     *
+     * KIDS v1.9.7: with the pause starting at exhaustion, an unspent quota has NO boundary at
+     * all, and neither has an anchor the {@code inCooldown} flag does not vouch for (parent
+     * lowered the timer, or a crash between the counter save and the anchor save). Nothing is
+     * scheduled unless {@code used >= limit} AND the flag is set — otherwise the one-shot would
+     * fire into {@link #onRolloverCheck()} with "not expired yet" and re-post itself every
+     * ROLLOVER_MIN_MS for as long as the gate is open.
      *
      * No limit set (timer 0) means there is no gate to open, so nothing is scheduled.
      */
@@ -508,17 +520,28 @@ public class KidsTimeUpLock {
             return; // no watch limit: nothing rolls over, nothing to unlock
         }
 
+        long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
+
+        if (data.getUsedMs() < limitMs || !data.isInCooldown()) {
+            // The quota was not reached yet, or no pause was anchored at exhaustion: the interval
+            // is not a running pause, so there is no boundary to wait for (and the controller
+            // will anchor one on exhaustion). Without the flag check an ordinary anchor would
+            // re-post this one-shot every ROLLOVER_MIN_MS for as long as the gate is up.
+            Log.d(TAG, "Rollover check skipped: no pause anchored (%s/%s ms, inCooldown=%s)",
+                    data.getUsedMs(), limitMs, data.isInCooldown());
+            return;
+        }
+
         // The host activity is destroyed right after arming (presenter.forceFinish()), so
         // anchor on the application context — a WeakReference to the activity would clear
         // and the check would silently never run if the child sleeps on the gate.
         sRolloverContext = new WeakReference<>(context.getApplicationContext());
 
-        int intervalMinutes = data.getResetIntervalMinutes();
-        long now = System.currentTimeMillis();
         // KIDS v1.9.5: the anchor IS the cooldown start — written by the controller at the
         // expiry instant, before this call. Boundary = anchor + interval; no clock grid.
-        long storedStart = data.getWindowStartMs();
-        long anchor = storedStart > 0 ? storedStart : now;
+        long now = System.currentTimeMillis();
+        int intervalMinutes = data.getResetIntervalMinutes();
+        long anchor = data.getWindowStartMs();
         long boundaryMs = anchor + KidsQuotaWindow.intervalMs(intervalMinutes);
         long delayMs = Math.max(ROLLOVER_MIN_MS, boundaryMs - now);
 
@@ -551,8 +574,10 @@ public class KidsTimeUpLock {
         KidsModeData data = KidsModeData.instance(context);
         long now = System.currentTimeMillis();
         int intervalMinutes = data.getResetIntervalMinutes();
+        long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
 
-        if (!KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes)) {
+        if (!KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes,
+                data.getUsedMs(), limitMs, data.isInCooldown())) {
             scheduleRolloverCheck(context); // boundary moved: wait for the real one
             return;
         }

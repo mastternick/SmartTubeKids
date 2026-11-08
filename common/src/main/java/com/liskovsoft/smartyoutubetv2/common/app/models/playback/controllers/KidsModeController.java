@@ -442,6 +442,13 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
     /**
      * True when the current window's watch limit (plus any parent bonus) is reached.
+     *
+     * KIDS v1.9.7: an exhausted quota starts the pause; it is released only when the pause has
+     * run its full interval (see {@link #resetWindowIfNeeded()}), never by elapsed time while
+     * the quota is still unspent. The stored anchor counts as the pause boundary only when
+     * {@link KidsModeData#isInCooldown()} says it was written at exhaustion; otherwise
+     * {@code anchorCooldownIfNeeded()} below anchors a fresh pause instead of expiring on an
+     * unrelated, older instant (parent-lowered timer, crash between counter and anchor saves).
      */
     public boolean isTimeExpired() {
         if (!isActive()) {
@@ -478,13 +485,13 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return 0;
         }
 
-        long start = Math.max(mLastPlayStartMs, getWindowStartMs(now));
+        long start = Math.max(mLastPlayStartMs, getWindowStartMs());
         long delta = now - start;
 
         return delta > 0 && delta < MAX_REAL_PLAY_GAP_MS ? delta : 0;
     }
 
-    private long getWindowStartMs(long nowMs) {
+    private long getWindowStartMs() {
         // KIDS v1.9.5: the stored window start IS the anchor (cooldown start when the quota
         // ran out). No clock grid: counting never reaches back before the anchor.
         return mKidsData.getWindowStartMs();
@@ -507,30 +514,39 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // inside it. A session that crosses the boundary must not push the previous window's
         // minutes onto the fresh counter.
         resetWindowIfNeeded();
-        long start = Math.max(mLastPlayStartMs, getWindowStartMs(now));
+        long start = Math.max(mLastPlayStartMs, getWindowStartMs());
         long delta = now - start;
         mLastPlayStartMs = now; // keep counting if still playing
 
         if (delta > 0 && delta < MAX_REAL_PLAY_GAP_MS) {
             mKidsData.addUsedMs(delta);
+            // KIDS v1.9.7: record the exhaustion instant the moment the counter crosses the
+            // limit, so the pause starts now even if the app is closed right after or the
+            // force-stop watchdog is off (nothing else would anchor it in time).
+            anchorCooldownIfNeeded();
         } else if (delta >= MAX_REAL_PLAY_GAP_MS) {
             Log.d(TAG, "Ignoring non-play gap of %s ms (standby/frozen process)", delta);
         }
     }
 
     /**
-     * KIDS v1.8: roll the counters over when the reset window moved on.
+     * KIDS v1.8: roll the counters over when the cooldown pause has run out.
      *
-     * KIDS v1.9.5: the window is [anchor, anchor + interval) counted from the stored anchor,
-     * not from a clock grid — the anchor written here is {@code now}, so a window that follows
-     * a cooldown starts exactly when the pause ends. The 24 h default lands on midnight only as
-     * a coincidence of the very first anchor.
+     * KIDS v1.9.7: the reset interval is a pause that only starts when the watch limit is
+     * reached, so nothing rolls over before exhaustion — {@link KidsQuotaWindow#isWindowExpired}
+     * returns false for any anchor while {@code used < limit} OR the {@code inCooldown} flag is
+     * clear (the anchor is only a pause boundary when it was written at exhaustion), and the
+     * child's budget simply keeps being spent down across sessions. Once exhausted, the anchor
+     * is the exhaustion instant (written by {@link #anchorCooldownIfNeeded()}) and the pause
+     * lasts exactly one interval from it; the anchor written here is {@code now}, i.e. the
+     * rollover, so the next window starts when the pause ends.
      */
     private void resetWindowIfNeeded() {
         long now = System.currentTimeMillis();
         int intervalMinutes = mKidsData.getResetIntervalMinutes();
 
-        if (!KidsQuotaWindow.isWindowExpired(mKidsData.getWindowStartMs(), now, intervalMinutes)) {
+        if (!KidsQuotaWindow.isWindowExpired(mKidsData.getWindowStartMs(), now, intervalMinutes,
+                mKidsData.getUsedMs(), getLimitMs(), mKidsData.isInCooldown())) {
             return;
         }
 
@@ -549,6 +565,24 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * replenished quota would exhaust again against the stale first anchor and the pause
      * would end at the old deadline instead of one fresh interval from the new expiry.
      * resetWindow (natural rollover) clears the flag too, covering the idle case.
+     *
+     * KIDS v1.9.7: the PAUSE anchor is written only here — never at rollover-of-elapsed-time,
+     * since no pause exists until the limit is reached. KidsModeData.resetWindow() stores a
+     * timestamp at rollover too, but without the {@code inCooldown} flag {@link
+     * KidsQuotaWindow#isWindowExpired} never treats it as a boundary. Before exhaustion a stored
+     * anchor carries no meaning and is ignored there (used < limit ⇒ no
+     * rollover), which is what makes the budget spendable across sessions. The flag is what
+     * turns an anchor into a pause boundary: without it — a parent lowering the timer below the
+     * already-counted usedMs, or a crash between addUsedMs and anchorCooldown in
+     * accumulatePlayTime — isWindowExpired answers false and this method writes a fresh anchor
+     * on the next check, so the pause never inherits a stale, unrelated instant.
+     *
+     * The flag is cleared in two places: at the source, by
+     * {@code KidsModeData.applyParentTimeChange(...)}, which both setters call (a replenish while
+     * the pause runs clears it; a grant after the pause already ran out performs the full rollover
+     * there and keeps only that grant), so a fresh bonus spent in one gap cannot roll over
+     * against the previous exhaustion's anchor; and by the used < limit branch below, which
+     * covers every other way the quota can come back unspent (resetWindow clears it too).
      */
     private void anchorCooldownIfNeeded() {
         if (mKidsData == null) {

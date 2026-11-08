@@ -192,16 +192,19 @@ public class KidsCountdownBadge {
     private static long remainingMs(Activity activity, KidsModeData data) {
         long now = System.currentTimeMillis();
         int intervalMinutes = data.getResetIntervalMinutes();
+        long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
 
         // A window that already moved on means a fresh quota. The rollover itself is done by
         // KidsModeController on its next tick — this must not write preferences every second.
-        long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes)
+        // KIDS v1.9.7: "moved on" requires BOTH the limit reached AND the pause anchored (the
+        // inCooldown flag) — not the limit alone; an elapsed-time-only anchor is not a boundary.
+        // So the badge keeps counting the same budget until it is spent.
+        long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes,
+                data.getUsedMs(), limitMs, data.isInCooldown())
                 ? 0
                 : data.getUsedMs();
 
-        return KidsQuotaWindow.remainingMs(
-                KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs()),
-                usedMs + getUnflushedPlayMs(activity));
+        return KidsQuotaWindow.remainingMs(limitMs, usedMs + getUnflushedPlayMs(activity));
     }
 
     private static PlaybackPresenter getPresenter(Context context) {

@@ -259,27 +259,62 @@ keys are still swallowed and the PIN dialog still needs 10 escape presses, each 
 2 s of the previous one.
 The overlay NEVER releases the lock by itself.
 
-**KIDS v1.9.4: quota gate auto-opens at reset boundary; KIDS v1.9.5: that boundary is a real pause.**
-The quota gate (force stop path) schedules a one-shot task at the end of the current reset window. When the
-window ends, the fresh quota is written and the gate releases **without a PIN** — Back and Home work again.
+**KIDS v1.9.4: quota gate auto-opens at reset boundary; KIDS v1.9.5: that boundary is a real pause;
+KIDS v1.9.7: the pause only starts once the quota is used up.**
+The quota gate (force stop path) schedules a one-shot task at the end of the cooldown pause — and only once the
+quota is exhausted (no pause is running before that). When the
+pause ends, the fresh quota is written and the gate releases **without a PIN** — Back and Home work again.
 Lock-at-end mode is deliberately excluded: it still requires the PIN.
 
-KIDS v1.9.5 replaced the clock-aligned grid with **cooldown-from-exhausty** semantics: the moment the quota
-runs out at T, `KidsModeController.anchorCooldownIfNeeded()` re-anchors the window AT T (once per exhaustion,
-tracked by the persisted `inCooldown` flag, blob index 24) so the window is exactly `[T, T + interval)`. The
-pause is therefore a full interval measured from exhaustion, never an instant grid boundary a minute away.
-The rollover — in the controller (`resetWindowIfNeeded`) and in the gate one-shot (`KidsTimeUpLock.scheduleRolloverCheck`)
-— then starts the next window at `now`, and the car plus the gate read the SAME stored anchor: the Mile Marker
-car reaching lamp 10 and the gate opening land on the same instant. The 24 h default still lands on local
-midnight, but only as a coincidence of the very first anchor. When no anchor is stored yet (fresh install) the
-one-shot falls back to `now` and the `ROLLOVER_MIN_MS` clamp keeps a single sane wake-up instead of a 1 s loop.
+KIDS v1.9.5 replaced the clock-aligned grid with **cooldown-from-exhaustion** semantics, and KIDS v1.9.7
+made the reset interval a **pause that only starts when the watch limit is reached** — it is not a rolling
+window at all. Until the quota is exhausted nothing resets: the child's budget keeps being spent down across
+sessions, however many days that takes, because `KidsQuotaWindow.isWindowExpired` returns false for any stored
+anchor while `used < limit` **or while the `inCooldown` flag is clear** — elapsed time alone never proves a pause
+is running. An anchor without the flag (the parent lowered the timer below the already-counted `used`, or the
+process died between the counter save and the anchor save in `accumulatePlayTime`) is not a boundary: no rollover,
+and `anchorCooldownIfNeeded()` writes a proper pause anchor on the next check, so a false "fresh quota" can never
+appear. The anchor means nothing before exhaustion and the PAUSE anchor is written at the moment the
+quota runs out (`KidsModeController.anchorCooldownIfNeeded()`, called both from the counter
+(`accumulatePlayTime`) and from the `isTimeExpired` gate, once per exhaustion thanks to the persisted
+`inCooldown` flag, blob index 24), so the pause is exactly `[T, T + interval)` from that instant.
+`KidsModeData.resetWindow()` does store a timestamp at rollover as well; it is simply not a pause
+boundary without the flag, and `isWindowExpired` never treats it as one. The rollover —
+in the controller (`resetWindowIfNeeded`) and in the gate one-shot (`KidsTimeUpLock.scheduleRolloverCheck`) —
+then writes the fresh quota and starts the next window at `now`. Because a scheduled check always has an
+exhaustion anchor, the gate one-shot always waits a full interval from exhaustion: no boundary exists before
+that, and `scheduleRolloverCheck` refuses to schedule at all while `used < limit` or `inCooldown` is clear
+(otherwise the one-shot would fire into `onRolloverCheck`, see "not expired yet" and re-post itself every
+`ROLLOVER_MIN_MS`). The car plus the gate
+read the SAME stored anchor, so the Mile Marker car reaching lamp 10 and the gate opening land on the same
+instant. A hand-edited or corrupted blob whose anchor is 0 still recovers: the `ROLLOVER_MIN_MS` clamp fires
+the one-shot and `onRolloverCheck` treats anchor 0 as expired.
 The task uses the application context (not the Activity, which is destroyed by `forceFinish()`) and is cancelled
 in `release()` and `releaseStateOnly()` to prevent chain stacking.
 
+**User-visible consequence:** the watch budget is spent down across sessions until it is used up — an unused
+quota is never replenished by the clock — and only then does the child wait the configured interval before a
+fresh quota starts.
+
 A parent extend during a cooldown (bonus minutes via `KidsModeSettingsPresenter` → `setBonusMs`, or a longer
-timer) makes the quota no longer exhausted: `anchorCooldownIfNeeded` then clears the flag (`clearCooldown`)
-without touching the anchor, so the NEXT exhaustion re-anchors at its own instant and the pause is again a
-full interval from that new expiry — never a stale deadline from the first one.
+timer) goes through `KidsModeData.applyParentTimeChange(...)` at the source, so no accumulate tick can ever
+observe the new limit against the old anchor. While the pause is still running and the quota became unspent,
+only the flag is cleared (anchor and spent budget untouched), so the NEXT exhaustion re-anchors at its own
+instant and the pause is again a full interval from that new expiry — never a stale deadline from the first
+one. Clearing it at the source (rather than waiting for the controller's next tick) matters because a child can
+spend a small bonus in a single accumulate gap (the gap guard bounds `delta`, not the tickle) and be exhausted
+again while the flag from the previous exhaustion is still set; the stale, already-elapsed anchor would then
+hand out a free window. `KidsModeController.anchorCooldownIfNeeded()` still clears the flag on its
+`used < limit` branch, covering any other path that leaves the quota unspent.
+
+If the pause had ALREADY run out when the parent adds time (nothing materialised the rollover yet — the app
+was idle, or the kiosk branch leaves it to the next play), the helper performs the FULL rollover right there:
+`used = 0`, bonus = 0, anchor = `now`, flag cleared — and then re-applies only the grant THIS call just made.
+That ordering is deliberate: an older bonus was spent by definition (exhaustion means `used >= timer + bonus`,
+and `used` can even overtake the limit when a clip runs to its end with force stop off or the PIN gate session
+suspends the hard stop), so keeping it would grant it twice; and testing elapse before "is the quota
+replenished" is required because a grant smaller than the overrun would otherwise look unspent-but-exhausted
+and be lost when the rollover zeroes the bonus.
 
 Load-bearing rules (do not "simplify" them away):
 
@@ -330,7 +365,8 @@ shown. Ten quick escape presses earn the way out. Two things are configurable.
 never opens the app without it. Turning the switch off only ever affects a device with kiosk
 disabled.
 
-The same rule applies to the automatic release: when the reset window ends, the gate opens
+The same rule applies to the automatic release: when the cooldown pause ends (i.e. once the quota has been
+used up and the configured interval has elapsed), the gate opens
 by itself **only if kiosk is off**. With kiosk on, the reset still replenishes the quota (so
 the next clip is not insta-locked) but the screen stays behind the PIN.
 
