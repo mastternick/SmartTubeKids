@@ -404,9 +404,11 @@ adb shell settings put secure accessibility_enabled 1
 adb shell settings get secure enabled_accessibility_services   # must print the component, not null
 ```
 
-- The **app-op** is the part that survives reboots and app updates; without it every other
-  command is undone at the next start. Lowercase `access_restricted_settings` fails with
-  `Unknown operation string` — the name is case-sensitive.
+- The **app-op** is the part that survives reboots; without it every other command is undone
+  at the next start. It is NOT permanent against updates: a sideloaded update can silently
+  re-arm the restriction, so re-check `appops get` after every sideloaded update.
+  Lowercase `access_restricted_settings` fails with `Unknown operation string` — the name
+  is case-sensitive.
 - The **`pm grant`** is optional but recommended: with it the app re-enables its own guard at
   boot (`KioskModeManager.trySelfHealKeyGuard`, called from `onDeviceBooted` and
   `applyOnResume`), appending its component to whatever else is enabled — never replacing it.
