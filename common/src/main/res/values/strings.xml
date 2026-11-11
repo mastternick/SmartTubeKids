@@ -783,7 +783,7 @@
     <string name="kids_force_stop_desc">Cut the running clip the instant the limit expires. The screen is covered and stays silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times, each within 2 seconds of the previous one. Then the Kids Mode PIN dialog appears — unless \'Ask for the PIN after 10 presses\' is off, in which case those 10 presses leave the screen directly. Once the reset interval has elapsed the screen opens by itself. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
     <string name="kids_force_stop_needs_pin">Stopping immediately needs a PIN to leave the black screen. Set one now.</string>
     <string name="kids_time_up_pin_hint">Time is up. Enter the PIN to continue.</string>
-    <string name="kids_lock_at_video_end">Lock the screen when a clip ends</string>
+    <string name="kids_lock_at_video_end">Lock screen at end of clip (PIN)</string>
     <string name="kids_lock_at_video_end_desc">Adds a Lock at end entry to the player playback-mode list. While that mode is selected, a clip that reaches its end stops on a black screen and stays silent: nothing is shown until an exit key (BACK, or HOME while the kiosk key guard is on) is pressed 10 times, each within 2 seconds of the previous one. Then the Kids Mode PIN dialog appears, and only the correct PIN leaves that screen. Requires an enabled PIN — turning this on without one asks you to set a PIN first.</string>
     <string name="kids_lock_at_video_end_needs_pin">The end-of-video lock needs a PIN to unlock the black screen. Set one now.</string>
     <string name="kids_mile_marker_done">Reset complete!</string>

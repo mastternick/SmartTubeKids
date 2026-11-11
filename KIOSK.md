@@ -296,12 +296,15 @@ window at all. Until the quota is exhausted nothing resets: the child's budget k
 sessions, however many days that takes, because `KidsQuotaWindow.isWindowExpired` returns false for any stored
 anchor while `used < limit` **or while the `inCooldown` flag is clear** — elapsed time alone never proves a pause
 is running. An anchor without the flag (the parent lowered the timer below the already-counted `used`, or the
-process died between the counter save and the anchor save in `accumulatePlayTime`) is not a boundary: no rollover,
+process died before `stopCounting()` could anchor the pause and the idle `onTickle()` has not run yet) is not a
+boundary: no rollover,
 and `anchorCooldownIfNeeded()` writes a proper pause anchor on the next check, so a false "fresh quota" can never
-appear. The anchor means nothing before exhaustion and the PAUSE anchor is written at the moment the
-quota runs out (`KidsModeController.anchorCooldownIfNeeded()`, called both from the counter
-(`accumulatePlayTime`) and from the `isTimeExpired` gate, once per exhaustion thanks to the persisted
-`inCooldown` flag, blob index 24), so the pause is exactly `[T, T + interval)` from that instant.
+appear. The anchor means nothing before exhaustion and the PAUSE anchor is written **when the exhausted
+playback STOPS** (`KidsModeController.anchorCooldownIfNeeded()`, called from `stopCounting()` — pause, end of
+clip, released engine — and from the idle `onTickle()` for an exhaustion nothing is playing anymore, once per
+exhaustion thanks to the persisted `inCooldown` flag, blob index 24), so the pause is exactly
+`[T, T + interval)` from that instant. With **Stop immediately** ON the cut is the stop, so the pause starts at
+the cut; with it OFF the running clip finishes first (see the v1.10 reset-timing section below).
 `KidsModeData.resetWindow()` does store a timestamp at rollover as well; it is simply not a pause
 boundary without the flag, and `isWindowExpired` never treats it as one. The rollover —
 in the controller (`resetWindowIfNeeded`) and in the gate one-shot (`KidsTimeUpLock.scheduleRolloverCheck`) —
@@ -492,6 +495,56 @@ Load-bearing details:
   which sets `armState()`, the scene and `sNightStartMs`, covers, sets `sQuotaGate = true` and schedules
   the rollover check. Letting them diverge would silently break the no-PIN release branch
   (`sQuotaGate && !isPinRequiredAfterMash()`) and the automatic opening at reset.
+
+## Reset pause starts when the exhausted clip stops (KIDS v1.10 fix)
+
+**The bug (v1.9.7 → v1.10.0).** `KidsModeController.accumulatePlayTime()` anchored the reset pause the moment
+`used` crossed the limit. With **Stop immediately when time is up** OFF nothing stops the clip at that instant —
+it keeps playing while the pause runs — so the later tickle hit `resetWindowIfNeeded()`, rolled the window over
+mid-clip, and handed the child a fresh quota while the very same clip was still on screen (badge, gate and
+counters all jumped back).
+
+**The new rule.** The counter only SPENDS the budget and never anchors. The pause anchor is written when the
+exhausted playback STOPS:
+
+- `stopCounting()` — pause, end of clip, released engine — clears the play marker and then anchors, so the
+  child's own "stop watching" instant is the pause start;
+- `onTickle()` anchors an exhaustion that nothing is playing anymore (process restart, quota spent to the last
+  millisecond) — the idle path has no stop event;
+- `anchorCooldownIfNeeded()` refuses to anchor while `mLastPlayStartMs != 0` unless
+  `KidsTimeUpLock.isForceStopActive()`, which is what closes the mid-clip hole.
+
+**Force-stop ON is unchanged.** The cut IS the stop, so the pause starts at the cut and the gate opens one
+interval later, exactly as in v1.9.8.
+
+Edge cases, on purpose:
+
+- Pause/stop mid-clip after exhaustion: the pause anchors then. Pressing PLAY again stops the pause clock — an
+  elapsed pause rolls over first, and a still-running one drops the `inCooldown` flag (the anchor stays but is not
+  a boundary), so the next stop re-anchors the full pause and no rollover can land mid-clip. With force-stop ON
+  the anchor is kept so the gate still opens one interval after the cut.
+- Process death while exhausted and playing: no anchor is written until the next `stopCounting()`/`onTickle()`;
+  the `inCooldown` flag is still clear, so no rollover can ride on a stale instant.
+- No prefs change: no new blob index, no migration, `KidsQuotaWindow` math and `KidsModeData` are untouched.
+
+**Device smoke (pending — needs the parental PIN):** set limit 15 min, reset 5 min, **Stop immediately** OFF and
+start a 30-minute clip → at 15:00 the badge reaches `0:01` and then disappears, and the quota does NOT roll over
+while the clip plays; when the clip ends the pause starts; new videos are blocked; after 5 min the next clip
+plays normally. Then with **Stop immediately** ON the clip must still cut at 15:00 and the screen must open 5 min
+later.
+
+## Calm-exit warning banner (KIDS v1.10)
+
+The -5 / -2 / -1 minute warnings were a toast (invisible on top of the player) plus `showOverlay(true)`, which
+interrupted the clip. `KidsWarningBanner.show(activity, text)` now attaches a bottom-center `TextView` tagged
+`kids_calm_warning` to the activity decor (`0xCC000000`, 26sp white bold, non-focusable / non-clickable /
+non-long-clickable), refreshes the text if the banner is already up and removes itself after 8 s. A short
+`ToneGenerator` beep (`STREAM_MUSIC`, released after the tone) plays **only** while a clip is initialized and
+playing, so a paused player or the browse screen stays silent. Playback is never paused, seeked or overlaid.
+
+The RO translations (`kids_calm_exit`, `kids_calm_exit_desc`, `kids_time_left`) were missing and are added.
+`kids_lock_at_video_end` now reads **Lock screen at end of clip (PIN)** / **Blocare ecran la finalul clipului
+(PIN)**; its description text is unchanged.
 
 ## Kiosk key guard after a reboot (KIDS v1.9.6)
 

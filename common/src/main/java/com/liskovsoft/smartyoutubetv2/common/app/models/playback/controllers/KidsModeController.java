@@ -14,6 +14,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.KidsBedtime;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsQuotaWindow;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsWarningBanner;
 import com.liskovsoft.smartyoutubetv2.common.misc.TickleManager;
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
@@ -51,6 +52,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     private boolean mWarned5;
     private boolean mWarned2;
     private boolean mWarned1;
+    // KIDS v1.10: with force-stop OFF the exhausted clip keeps playing, so the ~60 s tickle
+    // reaches the time-up message again — show it once per window.
+    private boolean mTimeUpShown;
     private boolean mIsCalmExitInProgress; // KIDS: guard against double fade (onPlayEnd may fire twice)
     // KIDS: exact hard-stop watchdog. Tickle granularity is one minute, which is too
     // coarse for "stop immediately when the timer expires", so while the clip plays we
@@ -161,6 +165,17 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     @Override
     public void onPlay() {
         if (isActive()) {
+            // KIDS v1.10: two halves, both about a pause anchored while the child was not watching.
+            // (a) A pause that already elapsed during the stop must roll the window over BEFORE
+            // the clip resumes — rolling after the flag is dropped would lose the elapsed pause.
+            resetWindowIfNeeded();
+            // (b) A pause that is still running stops counting now that the child watches again.
+            // The anchor stays, but without the inCooldown flag it is not a boundary, so no
+            // mid-clip rollover; the next stopCounting() re-anchors the full pause. With
+            // force-stop ON the anchor is kept, so the gate still opens one interval after the cut.
+            if (!isForceStopActive() && mKidsData.isInCooldown() && mKidsData.getUsedMs() >= getLimitMs()) {
+                mKidsData.clearCooldown();
+            }
             mLastPlayStartMs = System.currentTimeMillis();
             scheduleForceStop(); // KIDS: paused time isn't counted, so (re)arm on every play
         }
@@ -282,6 +297,10 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // the time-up message use the fresh quota right after a reset boundary.
         resetWindowIfNeeded();
         accumulatePlayTime();
+        // KIDS v1.10: an exhaustion reached while nothing is playing (e.g. after a process
+        // restart, or a quota spent to the last ms) has no stop event to anchor it — the idle
+        // tickle anchors the pause instead.
+        anchorCooldownIfNeeded();
         checkWarnings();
 
         // KIDS: keep the exact hard-stop watchdog aligned with the freshly counted time
@@ -458,7 +477,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * the quota is still unspent. The stored anchor counts as the pause boundary only when
      * {@link KidsModeData#isInCooldown()} says it was written at exhaustion; otherwise
      * {@code anchorCooldownIfNeeded()} below anchors a fresh pause instead of expiring on an
-     * unrelated, older instant (parent-lowered timer, crash between counter and anchor saves).
+     * unrelated, older instant (a parent-lowered timer, or a crash between the counter and the
+     * anchor save).
+     *
+     * KIDS v1.10: the pause anchor is written when the exhausted playback STOPS (or at the cut
+     * with force-stop ON), so asking this question during a running clip — as the warnings, the
+     * gate and the playlist all do — never starts the pause mid-clip.
      */
     public boolean isTimeExpired() {
         if (!isActive()) {
@@ -510,6 +534,10 @@ public class KidsModeController extends BasePlayerController implements TickleMa
     private void stopCounting() {
         accumulatePlayTime();
         mLastPlayStartMs = 0; // KIDS FIX: never carry a stale marker across a pause/standby
+        // KIDS v1.10: the reset pause starts when the child stops watching. With "Stop
+        // immediately" OFF the exhausted clip is allowed to finish, and its play time must not
+        // burn the pause — the anchor is written HERE, not when the quota was crossed.
+        anchorCooldownIfNeeded();
     }
 
     private void accumulatePlayTime() {
@@ -530,10 +558,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         if (delta > 0 && delta < MAX_REAL_PLAY_GAP_MS) {
             mKidsData.addUsedMs(delta);
-            // KIDS v1.9.7: record the exhaustion instant the moment the counter crosses the
-            // limit, so the pause starts now even if the app is closed right after or the
-            // force-stop watchdog is off (nothing else would anchor it in time).
-            anchorCooldownIfNeeded();
+            // KIDS v1.10: the counter only SPENDS the budget — it never anchors the reset pause.
+            // With "Stop immediately" OFF the clip keeps playing while the quota is crossed, so
+            // anchoring here would let the remaining play time burn the pause (see stopCounting).
         } else if (delta >= MAX_REAL_PLAY_GAP_MS) {
             Log.d(TAG, "Ignoring non-play gap of %s ms (standby/frozen process)", delta);
         }
@@ -546,10 +573,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * reached, so nothing rolls over before exhaustion — {@link KidsQuotaWindow#isWindowExpired}
      * returns false for any anchor while {@code used < limit} OR the {@code inCooldown} flag is
      * clear (the anchor is only a pause boundary when it was written at exhaustion), and the
-     * child's budget simply keeps being spent down across sessions. Once exhausted, the anchor
-     * is the exhaustion instant (written by {@link #anchorCooldownIfNeeded()}) and the pause
-     * lasts exactly one interval from it; the anchor written here is {@code now}, i.e. the
-     * rollover, so the next window starts when the pause ends.
+     * child's budget simply keeps being spent down across sessions. Once exhausted, the pause
+     * anchor is written when the exhausted playback STOPS (with force-stop ON: at the cut
+     * instead) by {@link #anchorCooldownIfNeeded()}, and the pause lasts exactly one interval
+     * from it; the anchor written here is {@code now}, i.e. the rollover, so the next window
+     * starts when the pause ends.
      */
     private void resetWindowIfNeeded() {
         long now = System.currentTimeMillis();
@@ -576,6 +604,16 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * would end at the old deadline instead of one fresh interval from the new expiry.
      * resetWindow (natural rollover) clears the flag too, covering the idle case.
      *
+     * KIDS v1.10: WHEN the anchor is written. It is the moment the exhausted playback STOPS:
+     * {@code stopCounting()} (pause, end of clip, released engine) writes it after clearing the
+     * play marker, and the idle {@code onTickle()} path writes it for an exhaustion nothing is
+     * playing anymore (e.g. after a process restart). With "Stop immediately when time is up"
+     * ON the cut is the stop, so the immediate anchor of v1.9.7 is kept by the mid-play guard
+     * below. With it OFF the running clip is ALLOWED to finish: anchoring at the instant the
+     * counter crossed the limit let the rest of that clip burn the reset pause and roll the
+     * quota over mid-clip (the v1.10 bug). The counter ({@code accumulatePlayTime}) therefore
+     * only spends the budget and never anchors.
+     *
      * KIDS v1.9.7: the PAUSE anchor is written only here — never at rollover-of-elapsed-time,
      * since no pause exists until the limit is reached. KidsModeData.resetWindow() stores a
      * timestamp at rollover too, but without the {@code inCooldown} flag {@link
@@ -583,9 +621,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * anchor carries no meaning and is ignored there (used < limit ⇒ no
      * rollover), which is what makes the budget spendable across sessions. The flag is what
      * turns an anchor into a pause boundary: without it — a parent lowering the timer below the
-     * already-counted usedMs, or a crash between addUsedMs and anchorCooldown in
-     * accumulatePlayTime — isWindowExpired answers false and this method writes a fresh anchor
-     * on the next check, so the pause never inherits a stale, unrelated instant.
+     * already-counted usedMs, or a crash between addUsedMs and the anchor save — isWindowExpired
+     * answers false and this method writes a fresh anchor on the next check, so the pause never
+     * inherits a stale, unrelated instant.
      *
      * The flag is cleared in two places: at the source, by
      * {@code KidsModeData.applyParentTimeChange(...)}, which both setters call (a replenish while
@@ -609,6 +647,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return;
         }
 
+        // KIDS v1.10: with "Stop immediately" OFF the running clip is allowed to finish; its
+        // play time must not burn the reset pause. Anchor when playback stops (stopCounting).
+        if (mLastPlayStartMs != 0 && !isForceStopActive()) {
+            return;
+        }
+
         if (!mKidsData.isInCooldown()) {
             mKidsData.anchorCooldown(System.currentTimeMillis());
         }
@@ -620,6 +664,13 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         }
 
         long remainingMs = getRemainingMs();
+
+        if (remainingMs > 5 * 60_000L) {
+            // KIDS v1.10: a replenished quota (e.g. the parent raised the timer) re-arms the
+            // once-per-window warnings. Do NOT reset on used < limit: that is true through the
+            // whole last-5-minutes phase and would repeat the 5-min banner on every tickle.
+            resetWarnings();
+        }
 
         if (remainingMs > 0 && remainingMs <= 60_000L && !mWarned1) {
             mWarned1 = true;
@@ -640,11 +691,19 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             return;
         }
 
-        // Show warning as a toast; also as player title overlay when playing
-        MessageHelpers.showMessage(getContext(), getContext().getString(R.string.kids_time_left, String.valueOf(minutes)));
+        // KIDS v1.10: a toast was invisible in the player, and showing the player overlay on
+        // every warning interrupted the clip. The banner is decoration: playback is untouched.
+        CharSequence text = getContext().getString(R.string.kids_time_left, String.valueOf(minutes));
+        Activity activity = getActivity();
 
-        if (getPlayer() != null && getPlayer().isEngineInitialized()) {
-            getPlayer().showOverlay(true);
+        if (activity != null) {
+            KidsWarningBanner.show(activity, text);
+        } else {
+            MessageHelpers.showMessage(getContext(), text.toString());
+        }
+
+        if (getPlayer() != null && getPlayer().isEngineInitialized() && getPlayer().isPlaying()) {
+            KidsWarningBanner.playBeep();
         }
 
         Log.d(TAG, "Calm exit warning: %s minutes left", minutes);
@@ -654,6 +713,14 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         if (getContext() == null) {
             return;
         }
+
+        // KIDS v1.10: one message per window — the exhausted clip keeps playing with force-stop
+        // OFF, so checkWarnings reaches this again on every tickle until the playback stops.
+        if (mTimeUpShown) {
+            return;
+        }
+
+        mTimeUpShown = true;
 
         MessageHelpers.showMessage(getContext(), R.string.kids_time_up);
 
@@ -667,6 +734,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         mWarned5 = false;
         mWarned2 = false;
         mWarned1 = false;
+        mTimeUpShown = false;
     }
 
     /**
