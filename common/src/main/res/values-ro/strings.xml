@@ -696,7 +696,7 @@
   <string name="kids_no_playlists_found">Nu s-a găsit niciun playlist. Conectează-te la cont sau creează mai întâi un playlist</string>
   <!-- KIDS v1.5: oprire imediata la expirarea timpului + ecran negru blocat cu PIN -->
   <string name="kids_force_stop">Oprește imediat când timpul expiră</string>
-  <string name="kids_force_stop_desc">Taie clipul în momentul în care expiră limita. Ecranul devine negru și rămâne negru și mut: nu apare nimic până când o tastă de ieșire (BACK sau HOME, când paznicul de taste kiosk este activ) este apăsată de 10 ori în maximum 10 secunde — doar atunci apare dialogul PIN-ului Kids Mode, iar numai PIN-ul corect închide acel ecran. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
+  <string name="kids_force_stop_desc">Taie clipul în momentul în care expiră limita. Ecranul devine negru și rămâne negru și mut: nu apare nimic până când o tastă de ieșire (BACK sau HOME, când paznicul de taste kiosk este activ) este apăsată de 10 ori, fiecare apăsare la cel mult 2 secunde după cea anterioară. Apoi apare dialogul PIN-ului Kids Mode — în afară de cazul în care „Cere PIN-ul după 10 apăsări" este oprit, iar atunci acele 10 apăsări scot direct din ecran. După ce intervalul de resetare s-a scurs, ecranul se deschide singur. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
   <string name="kids_force_stop_needs_pin">Oprirea imediată are nevoie de un PIN pentru a ieși din ecranul negru. Setează unul acum.</string>
   <string name="kids_time_up_pin_hint">Timpul s-a terminat. Introdu PIN-ul pentru a continua.</string>
   <!-- KIDS v1.8: interval de resetare + cronometru pentru timpul rămas -->
@@ -707,12 +707,12 @@
   <string name="kids_mile_marker_title">Mod Marcare Ritmică</string>
   <string name="kids_mile_marker_desc">Când timpul expirează, o mașinuță pornește pe șoseaua de noapte. Pe măsură ce fereastra de resetare trece, felinarele se aprind rând pe rând. Când mașinuța ajunge la felinarul 10, resetarea este completă.</string>
   <string name="kids_mash_pin_title">Cere PIN-ul după 10 apăsări</string>
-  <string name="kids_mash_pin_desc">Când limita de timp s-a terminat, 10 apăsări rapide pe BACK deschid dialogul PIN. Dezactivează pentru ca acele 10 apăsări să iasă direct din ecranul de timp expirat. Modul kiosk cere mereu PIN-ul.</string>
+  <string name="kids_mash_pin_desc">Când limita de timp s-a terminat, 10 apăsări rapide pe BACK deschid dialogul PIN. Dezactivează pentru ca acele 10 apăsări să iasă direct din ecranul de timp expirat.</string>
   <string name="kids_countdown_warning">Cronometru pentru timpul rămas</string>
   <string name="kids_countdown_off">Oprit</string>
   <string name="kids_time_up">Kids Mode: timpul s-a terminat.</string>
   <string name="kids_lock_at_video_end">Blochează ecranul când se termină clipul</string>
-  <string name="kids_lock_at_video_end_desc">Adaugă intrarea Blochează la final în lista de moduri de redare din player. Cât timp acel mod este selectat, un clip care ajunge la final se oprește pe ecran negru și rămâne mut: nu apare nimic până când o tastă de ieșire (BACK sau HOME, când paznicul de taste kiosk este activ) este apăsată de 10 ori în maximum 10 secunde — doar atunci apare dialogul PIN-ului Kids Mode, iar numai PIN-ul corect închide acel ecran. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
+  <string name="kids_lock_at_video_end_desc">Adaugă intrarea Blochează la final în lista de moduri de redare din player. Cât timp acel mod este selectat, un clip care ajunge la final se oprește pe ecran negru și rămâne mut: nu apare nimic până când o tastă de ieșire (BACK sau HOME, când paznicul de taste kiosk este activ) este apăsată de 10 ori, fiecare apăsare la cel mult 2 secunde după cea anterioară. Apoi apare dialogul PIN-ului Kids Mode, iar numai PIN-ul corect închide acel ecran. Necesită un PIN activat — dacă îl pornești fără PIN, ți se cere mai întâi să setezi unul.</string>
   <string name="kids_lock_at_video_end_needs_pin">Blocarea la finalul clipului are nevoie de un PIN pentru a ieși din ecranul negru. Setează unul acum.</string>
   <string name="kids_mile_marker_done">Resetare completă!</string>
 </resources>

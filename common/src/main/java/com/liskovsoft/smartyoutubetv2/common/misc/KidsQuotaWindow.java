@@ -106,4 +106,21 @@ public final class KidsQuotaWindow {
 
         return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60);
     }
+
+    /**
+     * KIDS v1.9.8: label for the time left until the reset pause ends — the Mile Marker car's
+     * remaining distance to lamp 10. Seconds are rounded UP, so the last second reads 0:01 and
+     * 0:00 only appears when the pause is actually over. Hours appear only when there are any,
+     * so a 5-min pause reads 5:00 and a 24 h one 24:00:00.
+     */
+    public static String formatRemaining(long remainingMs) {
+        long seconds = (Math.max(0, remainingMs) + 999) / 1000;
+        long hours = seconds / 3600;
+
+        if (hours > 0) {
+            return String.format(Locale.US, "%d:%02d:%02d", hours, (seconds % 3600) / 60, seconds % 60);
+        }
+
+        return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60);
+    }
 }

@@ -399,9 +399,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         final Activity activity = getActivity();
 
         // KIDS force stop: cut the clip NOW, arm the screen immediately, and firmly finish the player
-        if (activity != null) {
-            KidsTimeUpLock.arm(activity, mKidsData.isUseMileMarker());
-        }
+        // KIDS v1.9.8: always arm, activity or not. arm() null-checks the cover itself, and skipping
+        // it left sQuotaGate false — the gate then could neither open by itself at the reset nor be
+        // escaped with one key press (an activity-less arm can happen when the ticker fires while no
+        // view is attached; applyOnResume schedules the one-shot on the next resume).
+        KidsTimeUpLock.arm(activity, mKidsData.isUseMileMarker());
         presenter.forceFinish();
     }
 

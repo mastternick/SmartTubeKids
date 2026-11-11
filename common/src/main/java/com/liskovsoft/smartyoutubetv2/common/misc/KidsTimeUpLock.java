@@ -64,6 +64,13 @@ public class KidsTimeUpLock {
     private static final Runnable sRolloverTask = KidsTimeUpLock::onRolloverCheck;
     private static WeakReference<Context> sRolloverContext;
     private static boolean sQuotaGate;
+    // KIDS v1.9.8: the reset pause is over — this long celebration first (the car is seen
+    // reaching lamp 10 and "Reset complete!" shows), then the gate opens by itself.
+    private static final long GATE_OPEN_CELEBRATION_MS = 3_000L;
+    private static final Runnable sOpenGateTask = KidsTimeUpLock::onOpenGate;
+    // The celebration is posted once per gate: a resume re-runs scheduleRolloverCheck, and
+    // re-posting there would restart the 3 s countdown forever.
+    private static boolean sOpenGatePending;
 
     private KidsTimeUpLock() {
     }
@@ -321,6 +328,14 @@ public class KidsTimeUpLock {
             return;
         }
 
+        // KIDS v1.9.8: the reset pause has run out — ONE key press opens the gate on the spot.
+        // No mash, no PIN, kiosk included: after a reset nobody may be told to press ten times
+        // or to type a PIN. The one-shot below normally already got there by itself.
+        if (sQuotaGate && isResetWindowDone(activity)) {
+            openResetGate(activity, activity);
+            return;
+        }
+
         if (isEscapePress(event)) {
             KidsTimeUpKeyGate.onEscapeKeyPressed();
         }
@@ -332,18 +347,15 @@ public class KidsTimeUpLock {
         // KIDS v1.9.6: only the QUOTA time-up screen honours the opt-out — a Lock-at-end
         // lock keeps requiring the PIN (the switch text promises the time limit only).
         if (sQuotaGate && !data.isPinRequiredAfterMash()) {
-            // Kiosk still wins: never open the app without the PIN when the key guard is on.
-            if (KioskModeManager.isKioskEnabled(activity)) {
-                Log.d(TAG, "Kiosk enabled: PIN still required to leave the time-up screen");
-            } else {
-                // Deliberately NO KidsPinGate.unlock() here: that opens a 10-minute parent
-                // session which skips the PIN for the Kids Mode settings dialog, so ten
-                // mashed BACK presses would let a child switch Kids Mode / the timer / the
-                // PIN off. The presses only drop the time-up screen, nothing else.
-                release(activity);
-                Log.d(TAG, "Mash complete and PIN not required: time-up gate released");
-                return;
-            }
+            // KIDS v1.9.8: the switch now wins over kiosk mode too. Kiosk keeps HOME/RECENTS
+            // blocked anyway and no parent session is granted here, so the child gains nothing.
+            // Deliberately NO KidsPinGate.unlock() here: that opens a 10-minute parent
+            // session which skips the PIN for the Kids Mode settings dialog, so ten
+            // mashed BACK presses would let a child switch Kids Mode / the timer / the
+            // PIN off. The presses only drop the time-up screen, nothing else.
+            release(activity);
+            Log.d(TAG, "Mash complete and PIN not required: time-up gate released");
+            return;
         }
 
         if (activity.isFinishing() || activity.isDestroyed()) {
@@ -419,8 +431,15 @@ public class KidsTimeUpLock {
      * The guard service shares this process (no android:process in the manifest), so the
      * in-memory lock state and the gate below are the live ones.
      */
-    public static void onGuardEscapeKey(KeyEvent event) {
+    public static void onGuardEscapeKey(Context context, KeyEvent event) {
         if (!sLocked || !isEscapePress(event)) {
+            return;
+        }
+
+        // KIDS v1.9.8: with kiosk on, HOME/RECENTS die in the guard — after a reset the first
+        // one must open the gate exactly like BACK does, instead of counting towards the mash.
+        if (sQuotaGate && isResetWindowDone(context)) {
+            openResetGate(context, MotherActivity.getResumedActivity());
             return;
         }
 
@@ -458,6 +477,8 @@ public class KidsTimeUpLock {
         sQuotaGate = false;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
+        Utils.removeCallbacks(sOpenGateTask);
+        sOpenGatePending = false;
         KidsTimeUpKeyGate.resetSequence();
 
         if (activity != null) {
@@ -479,6 +500,8 @@ public class KidsTimeUpLock {
         sQuotaGate = false;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
+        Utils.removeCallbacks(sOpenGateTask);
+        sOpenGatePending = false;
         invalidateGateAuthorization();
         KidsTimeUpKeyGate.resetSequence();
 
@@ -487,6 +510,71 @@ public class KidsTimeUpLock {
         if (activity != null && MileMarkerOverlay.isShown(activity)) {
             MileMarkerOverlay.clearFor(activity);
         }
+    }
+
+    /**
+     * KIDS v1.9.8: has the pause that started at exhaustion run its full interval? Same
+     * predicate the controller uses to roll the window over, so screen and gate cannot drift.
+     */
+    private static boolean isResetWindowDone(Context context) {
+        if (context == null) {
+            return false;
+        }
+
+        KidsModeData data = KidsModeData.instance(context);
+
+        if (data.getTimerMinutes() <= 0) {
+            return false; // no watch limit: no pause, nothing to open
+        }
+
+        long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
+
+        if (data.getUsedMs() < limitMs) {
+            // No pause ever started: isWindowExpired answers true for a 0 anchor regardless of
+            // `used`, and a corrupted blob must not hand a locked child a free window.
+            return false;
+        }
+
+        return KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
+                data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown());
+    }
+
+    /**
+     * KIDS v1.9.8: write the fresh quota and drop the gate — no mash, no PIN, kiosk included.
+     * Once the reset has happened the screen opens by itself; the child is never told to press
+     * ten times or to type a PIN after a reset.
+     */
+    private static void openResetGate(Context context, Activity host) {
+        if (context == null) {
+            return; // fail closed: never release without writing the fresh quota
+        }
+
+        KidsModeData.instance(context).resetWindow(System.currentTimeMillis());
+
+        // Prefer the activity the caller already has: the static can be null (or stale) exactly
+        // when the overlay has to be detached from a known host.
+        release(host != null ? host : MotherActivity.getResumedActivity());
+
+        Log.d(TAG, "Reset pause over: gate opened without mash/PIN");
+    }
+
+    /** Delayed by {@link #GATE_OPEN_CELEBRATION_MS}: let the car reach lamp 10 first. */
+    private static void onOpenGate() {
+        sOpenGatePending = false;
+
+        if (!sLocked || !sQuotaGate) {
+            return; // released meanwhile
+        }
+
+        Context context = sRolloverContext != null ? sRolloverContext.get() : null;
+
+        if (context == null || !isResetWindowDone(context)) {
+            // Context gone (nothing could write the fresh quota) or the clock jumped: stay
+            // locked — the first key press still opens the gate through its own activity.
+            return;
+        }
+
+        openResetGate(context, null);
     }
 
     /**
@@ -550,9 +638,14 @@ public class KidsTimeUpLock {
     }
 
     /**
-     * KIDS v1.9.4: the reset window has moved on — write the fresh quota and open the gate
-     * WITHOUT a PIN, so Back/Home work again. If the boundary shifted meanwhile (interval
-     * change, backwards clock jump) the window is not expired yet: re-schedule instead.
+     * KIDS v1.9.4: the reset window has moved on — the gate then opens WITHOUT a PIN, so
+     * Back/Home work again. If the boundary shifted meanwhile (interval change, backwards
+     * clock jump) the window is not expired yet: re-schedule instead.
+     *
+     * KIDS v1.9.8: opening is a {@link #GATE_OPEN_CELEBRATION_MS} delayed second step
+     * ({@link #onOpenGate()}) so the mile marker car is seen reaching lamp 10, and kiosk
+     * mode no longer holds the gate shut after a reset. {@link #openResetGate(Context, Activity)}
+     * writes the fresh quota right before releasing.
      */
     private static void onRolloverCheck() {
         if (!sLocked || !sQuotaGate) {
@@ -571,32 +664,21 @@ public class KidsTimeUpLock {
             return;
         }
 
-        KidsModeData data = KidsModeData.instance(context);
-        long now = System.currentTimeMillis();
-        int intervalMinutes = data.getResetIntervalMinutes();
-        long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
-
-        if (!KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes,
-                data.getUsedMs(), limitMs, data.isInCooldown())) {
+        if (!isResetWindowDone(context)) {
             scheduleRolloverCheck(context); // boundary moved: wait for the real one
             return;
         }
 
-        // KIDS v1.9.6: with kiosk enabled the gate never opens by itself — the parent must
-        // enter the PIN. The window is deliberately NOT re-anchored here: doing so would
-        // restart the Mile Marker car every interval while the screen stays locked. The
-        // controller rolls the window on the next play (resetWindowIfNeeded), so nothing is
-        // left insta-locked once the PIN is entered. The one-shot is not rescheduled.
-        if (KioskModeManager.isKioskEnabled(context)) {
-            Log.d(TAG, "Kiosk enabled: gate stays locked after reset, PIN required");
-            return;
+        // KIDS v1.9.8: kiosk no longer keeps the gate shut after a reset (the v1.9.6 rule made a
+        // finished reset still cost ten presses and a PIN). Celebrate first so the car is seen
+        // reaching lamp 10, then open by itself; a key press during the celebration opens it at
+        // once (onKeyPress / onGuardEscapeKey). The window IS re-anchored when that happens, so
+        // nothing is insta-locked on the next play.
+        if (sOpenGatePending) {
+            return; // already scheduled: a resume must not restart the celebration countdown
         }
 
-        data.resetWindow(now);
-
-        // View cleanup through release(): the mile scene / black screen must go with the gate.
-        release(MotherActivity.getResumedActivity());
-
-        Log.d(TAG, "Reset window rolled over while locked: gate opened without PIN");
+        sOpenGatePending = true;
+        Utils.postDelayed(sOpenGateTask, GATE_OPEN_CELEBRATION_MS);
     }
 }

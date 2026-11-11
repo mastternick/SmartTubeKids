@@ -5,7 +5,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.SystemClock;
 import android.view.View;
@@ -21,7 +20,14 @@ import java.lang.ref.WeakReference;
  * KIDS v1.9.4: a silent night-road view of the real quota reset window.
  * Main-thread only. Progress is read from preferences, never advanced by the animation.
  *
- * Continuous car: the car moves continuously from start to finish over the interval duration.
+ * KIDS v1.9.8: the scene is drawn on a pure black AMOLED background (no sky gradient), so the
+ * road surface, its edge stripes and the car stay the only lit elements. The lamps ramp from
+ * dark ahead of the car to a bright, glowing trail behind it.
+ *
+ * Continuous car: the car moves continuously from start to finish over the interval duration,
+ * and its destination is lamp 10 exactly at progress 1.0 — the instant the reset pause ends.
+ * Until then the bottom line shows the remaining time; it becomes the completion line only
+ * once the car has arrived and the lamp sweep is done.
  * Progressive lamps: each lamp lights up (medium brightness) when the car passes it,
  * and all lamps reach maximum brightness when the car reaches finish.
  * Same aligned-grid authority as the rollover one-shot in KidsTimeUpLock.
@@ -49,17 +55,20 @@ public class MileMarkerOverlay {
     // Road layout: 5% margin on each side, 10 lamps evenly distributed between them
     private static final float ROAD_MARGIN_FRAC = 0.05f;
     private static final float CAR_START_MARGIN_FRAC = 0.03f;
-    private static final float CAR_END_MARGIN_FRAC = 0.03f;
-    private static final float CAR_WIDTH_FRAC = 0.04f;
-    private static final float CAR_HEIGHT_FRAC = 0.035f;
+    // KIDS v1.9.8: no end margin — the car reaches lamp 10 (roadRight) exactly at progress 1.0,
+    // i.e. at the instant the reset pause ends. An early arrival made the reset look already done.
+    private static final float CAR_END_MARGIN_FRAC = 0f;
+    private static final float CAR_WIDTH_FRAC = 0.052f;
+    private static final float CAR_HEIGHT_FRAC = 0.046f;
     private static final float LAMP_RADIUS_FRAC = 0.012f;
-    private static final float LAMP_GLOW_RADIUS_FRAC = 0.04f;
     private static final float LAMP_POST_WIDTH_FRAC = 0.002f;
     private static final float LAMP_POST_HEIGHT_FRAC = 0.13f;
-    private static final int LAMP_GLOW_ALPHA_GLOW = 42;
-    private static final int LAMP_GLOW_ALPHA_MED = 22;
-    private static final int LAMP_GLOW_ALPHA_MAX = 85;
-    private static final int LAMP_BRIGHTNESS_MED = 50;
+    // KIDS v1.9.8: the celebration halo must stay above the (now brighter) trail halo.
+    private static final int LAMP_GLOW_ALPHA_GLOW = 70;
+    // KIDS v1.9.8: brighter lamps on the pure black background (22/50/85 -> 45/80/120).
+    private static final int LAMP_GLOW_ALPHA_MED = 45;
+    private static final int LAMP_GLOW_ALPHA_MAX = 120;
+    private static final int LAMP_BRIGHTNESS_MED = 80;
 
     private static final Runnable sTick = () -> tick();
 
@@ -68,6 +77,8 @@ public class MileMarkerOverlay {
     private static long sProgressChangedAtMs;
     private static boolean sCelebrated;
     private static long sCelebrationAtMs;
+    // KIDS v1.9.8: time left until the reset pause ends; drawn on the road until the reset.
+    private static long sRemainingMs;
 
     private MileMarkerOverlay() {
     }
@@ -124,6 +135,7 @@ public class MileMarkerOverlay {
         sCelebrated = false;
         sProgressChangedAtMs = 0;
         sCelebrationAtMs = 0;
+        sRemainingMs = 0;
     }
 
     /**
@@ -189,6 +201,7 @@ public class MileMarkerOverlay {
         long anchor = startMs > 0 ? startMs : now;
         long elapsedMs = Math.max(0, now - anchor);
         float progress = intervalMs > 0 ? Math.min(1.0f, (float) elapsedMs / (float) intervalMs) : 0f;
+        sRemainingMs = Math.max(0, intervalMs - elapsedMs);
         long animationNow = SystemClock.uptimeMillis();
 
         if (progress != sLastProgress) {
@@ -215,8 +228,6 @@ public class MileMarkerOverlay {
 
     private static class RoadView extends View {
         private final Paint mPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final GradientDrawable mSky = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xFF0D1117, 0xFF162130, 0xFF0D1117});
 
         public RoadView(Context context) {
             super(context);
@@ -224,15 +235,10 @@ public class MileMarkerOverlay {
         }
 
         @Override
-        protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
-            super.onSizeChanged(width, height, oldWidth, oldHeight);
-            mSky.setBounds(0, 0, width, height);
-        }
-
-        @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            mSky.draw(canvas);
+            // KIDS v1.9.8: pure black AMOLED background; only the road, lamps and car are lit.
+            canvas.drawColor(Color.BLACK);
 
             float width = getWidth();
             float height = getHeight();
@@ -288,8 +294,9 @@ public class MileMarkerOverlay {
                 canvas.drawText(MARKER_LABELS[i], x, centerY + height * 0.05f, mPaint);
 
                 // KIDS v1.9.5: lamps light up behind the car as it passes and stay lit.
-                // Distance-based ramp (immune to the 1 s tick): dark ahead, medium behind,
-                // maximum once the car reaches the end of the road.
+                // Distance-based ramp (immune to the 1 s tick): dark ahead, brighter trail behind
+                // (capped at 0.65 so a passed lamp keeps climbing), maximum once the car reaches
+                // the end of the road.
                 float brightness;
                 if (carX >= roadRight) {
                     brightness = 1.0f; // finish: every lamp at maximum
@@ -297,7 +304,7 @@ public class MileMarkerOverlay {
                     brightness = 0f;   // still ahead of the car
                 } else {
                     float passed = (carX - x) / lampSpacing;
-                    brightness = 0.5f * Math.min(1f, passed * 3f);
+                    brightness = 0.65f * Math.min(1f, passed * 3f);
                 }
 
                 // Lamp color: dark when off, amber when on, green when celebrating
@@ -355,11 +362,16 @@ public class MileMarkerOverlay {
                 }
             }
 
-            // "Reset complete!" text when finished
+            // KIDS v1.9.8: until the reset the line shows the time left to the end of the pause;
+            // the completion line only replaces it once the car has arrived (destination = reset).
+            mPaint.setColor(Color.WHITE);
+            mPaint.setTextSize(height * 0.035f);
+
             if (glowing) {
-                mPaint.setColor(Color.WHITE);
-                mPaint.setTextSize(height * 0.035f);
                 canvas.drawText(getContext().getString(R.string.kids_mile_marker_done),
+                        width * 0.5f, height * 0.78f, mPaint);
+            } else {
+                canvas.drawText(KidsQuotaWindow.formatRemaining(sRemainingMs),
                         width * 0.5f, height * 0.78f, mPaint);
             }
 

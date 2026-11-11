@@ -103,8 +103,9 @@ public class KioskKeyGuardService extends AccessibilityService {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     // KIDS: on the time-up black screen HOME/RECENTS are escape attempts
                     // too — they die here, so the mash counter must be fed from here or
-                    // "press HOME 10 times" could never reach its threshold.
-                    KidsTimeUpLock.onGuardEscapeKey(event);
+                    // "press HOME 10 times" could never reach its threshold. KIDS v1.9.8:
+                    // once the reset pause is over this key opens the gate on the spot.
+                    KidsTimeUpLock.onGuardEscapeKey(this, event);
                     KioskModeManager.bringAppBack(this);
                 }
 

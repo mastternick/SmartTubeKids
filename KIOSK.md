@@ -253,17 +253,41 @@ adb logcat -s KioskKeyGuardService
 
 When the parent enables **Mile Marker Mode** in Kids Mode settings, the time-up
 black screen (force stop path) is replaced by a night-road scene drawn on the
-activity decor (`MileMarkerOverlay`): a dark road with ten **numbered markers
-(1–10)**, each flanked by street-light poles. Nothing about the gate changes —
-keys are still swallowed and the PIN dialog still needs 10 escape presses, each within
-2 s of the previous one.
-The overlay NEVER releases the lock by itself.
+activity decor (`MileMarkerOverlay`): a night road on pure black with ten **numbered markers
+(1–10)**, each flanked by a street-light pole that lights up and glows brighter behind
+the car as it passes. While the pause is still running the gate underneath is unchanged —
+keys are swallowed and the PIN dialog needs 10 escape presses, each within 2 s of the
+previous one — but since **KIDS v1.9.8** the pause ending opens it by itself: the
+countdown reaches `0:00`, the car arrives at lamp 10, the "Reset complete!" sweep runs,
+and the overlay releases the lock; during that 3 s celebration any key press that reaches the
+app opens it immediately (the exact key rule is below).
+
+**KIDS v1.9.8 visuals: the scene IS the destination countdown.** Pure black AMOLED
+background (`canvas.drawColor(Color.BLACK)`; the sky gradient is gone), so the road, its
+edge stripes and the car stay the only lit elements. Lamps are brighter on black
+(`LAMP_GLOW_ALPHA_MED` 22→45, `LAMP_BRIGHTNESS_MED` 50→80, `LAMP_GLOW_ALPHA_MAX` 85→120,
+the behind-the-car ramp capped at 0.65 so a passed lamp keeps climbing, celebration halo
+42→70) and the car is bigger (`CAR_WIDTH_FRAC` 0.04→0.052, `CAR_HEIGHT_FRAC`
+0.035→0.046). `CAR_END_MARGIN_FRAC` 0.03→0 puts lamp 10 exactly at progress 1.0, i.e. the
+reset instant, and the line at `height*0.78` now shows the **remaining time** to it
+(`KidsQuotaWindow.formatRemaining`: `h:mm:ss` when ≥ 1 h else `m:ss`, seconds rounded UP,
+pinned to the same 1 s refresh that moves the car) instead of being empty; only the
+celebration branch draws "Reset complete!".
 
 **KIDS v1.9.4: quota gate auto-opens at reset boundary; KIDS v1.9.5: that boundary is a real pause;
-KIDS v1.9.7: the pause only starts once the quota is used up.**
+KIDS v1.9.7: the pause only starts once the quota is used up; KIDS v1.9.8: it opens with kiosk on too,
+after a 3 s celebration.**
 The quota gate (force stop path) schedules a one-shot task at the end of the cooldown pause — and only once the
 quota is exhausted (no pause is running before that). When the
-pause ends, the fresh quota is written and the gate releases **without a PIN** — Back and Home work again.
+pause ends, `KidsTimeUpLock.onRolloverCheck` does not open at once: it posts `sOpenGateTask`
+and `GATE_OPEN_CELEBRATION_MS` (3 s) later `onOpenGate` writes the fresh quota
+(`resetWindow(now)`) and releases the gate — long enough for the car to be seen reaching
+lamp 10 and the "Reset complete!" sweep to run. No PIN, no mash, and **v1.9.8 deleted the
+v1.9.6 "kiosk keeps the gate shut" rule**: a device with kiosk ON opens by itself too, and
+because the window is re-anchored at that instant the next clip is not insta-locked.
+`sOpenGatePending` allows exactly one celebration per gate (a resume re-runs
+`scheduleRolloverCheck`, which must not restart the 3 s countdown) and is cleared in
+`release()` / `releaseStateOnly()` together with the task.
 Lock-at-end mode is deliberately excluded: it still requires the PIN.
 
 KIDS v1.9.5 replaced the clock-aligned grid with **cooldown-from-exhaustion** semantics, and KIDS v1.9.7
@@ -286,8 +310,9 @@ exhaustion anchor, the gate one-shot always waits a full interval from exhaustio
 that, and `scheduleRolloverCheck` refuses to schedule at all while `used < limit` or `inCooldown` is clear
 (otherwise the one-shot would fire into `onRolloverCheck`, see "not expired yet" and re-post itself every
 `ROLLOVER_MIN_MS`). The car plus the gate
-read the SAME stored anchor, so the Mile Marker car reaching lamp 10 and the gate opening land on the same
-instant. A hand-edited or corrupted blob whose anchor is 0 still recovers: the `ROLLOVER_MIN_MS` clamp fires
+read the SAME stored anchor, so the Mile Marker car reaches lamp 10 exactly at the reset instant and the
+gate opens 3 s later — the length of the celebration (`GATE_OPEN_CELEBRATION_MS`) — never at a different
+boundary. A hand-edited or corrupted blob whose anchor is 0 still recovers: the `ROLLOVER_MIN_MS` clamp fires
 the one-shot and `onRolloverCheck` treats anchor 0 as expired.
 The task uses the application context (not the Activity, which is destroyed by `forceFinish()`) and is cancelled
 in `release()` and `releaseStateOnly()` to prevent chain stacking.
@@ -308,7 +333,7 @@ hand out a free window. `KidsModeController.anchorCooldownIfNeeded()` still clea
 `used < limit` branch, covering any other path that leaves the quota unspent.
 
 If the pause had ALREADY run out when the parent adds time (nothing materialised the rollover yet — the app
-was idle, or the kiosk branch leaves it to the next play), the helper performs the FULL rollover right there:
+was idle, or no gate was locked to run the one-shot), the helper performs the FULL rollover right there:
 `used = 0`, bonus = 0, anchor = `now`, flag cleared — and then re-applies only the grant THIS call just made.
 That ordering is deliberate: an older bonus was spent by definition (exhaustion means `used >= timer + bonus`,
 and `used` can even overtake the limit when a clip runs to its end with force stop off or the PIN gate session
@@ -349,7 +374,7 @@ anything outside the set sanitizes back to 1440). The stored unit switched from 
 with a one-time migration (`KidsMigration.migrateResetIntervalUnit`), and the settings UI shows
 values ≥ 60 as hours, values < 60 as minutes.
 
-## Time-up screen: PIN or straight out (KIDS v1.9.6)
+## Time-up screen: PIN or straight out (KIDS v1.9.6, revised v1.9.8)
 
 When the watch limit runs out the screen is a gate: every key is swallowed and nothing is
 shown. Ten quick escape presses earn the way out. Two things are configurable.
@@ -361,14 +386,35 @@ shown. Ten quick escape presses earn the way out. Two things are configurable.
 - **OFF:** the ten presses release the gate directly, no dialog. The presses themselves are
   the proof that a grown-up is there.
 
-**Kiosk mode always wins.** With kiosk enabled the PIN is required in both cases: the gate
-never opens the app without it. Turning the switch off only ever affects a device with kiosk
-disabled.
+**KIDS v1.9.8: the switch wins over kiosk.** The v1.9.6 rule ("kiosk mode always wins" — with
+kiosk enabled the PIN was required in both cases, so turning the switch off only ever mattered
+on a device with kiosk disabled) is deleted. With the switch OFF the ten presses release the
+time-up screen with no PIN dialog **even when kiosk mode is on**: kiosk keeps HOME/RECENTS
+blocked device-wide, and no `KidsPinGate` parent session is granted here (deliberately — that
+session would let the same presses open the Kids Mode settings), so the child gains nothing
+beyond the time-up screen. With the switch ON (default) the PIN is required, and kiosk adds
+nothing to that rule.
 
-The same rule applies to the automatic release: when the cooldown pause ends (i.e. once the quota has been
-used up and the configured interval has elapsed), the gate opens
-by itself **only if kiosk is off**. With kiosk on, the reset still replenishes the quota (so
-the next clip is not insta-locked) but the screen stays behind the PIN.
+The automatic release follows the same rule: when the cooldown pause ends (i.e. once the quota has
+been used up and the configured interval has elapsed), the gate opens by itself **regardless of
+kiosk mode** — 3 s after the boundary so the Mile Marker car is seen reaching lamp 10 — and the
+fresh quota is written first, so the next clip is not insta-locked.
+
+**KIDS v1.9.8: one key press opens it once the pause is over.** `onKeyPress` (every key the
+activity sees — `MotherActivity.dispatchKeyEvent` feeds them all while locked) and
+`onGuardEscapeKey(context, event)` (the keys the guard swallows, filtered by
+`KidsTimeUpLock.isEscapePress` to BACK / HOME / RECENTS / ESCAPE before consulting
+`isResetWindowDone`) both bypass the mash counter once the pause has run out. So once the pause is
+over, **any key press that reaches the app** opens the gate instantly — no 10 presses, no PIN, kiosk
+included. With kiosk ON, HOME/RECENTS reach it through the guard; the mic/assistant and SEARCH keys
+are swallowed by the guard, but `isEscapePress` rejects them early, so they never open the gate
+(with kiosk OFF nothing swallows them, so there they reach `onKeyPress` directly).
+`isResetWindowDone` is the controller's `isWindowExpired` predicate **plus** a
+`used >= limit` guard, so a corrupted anchor-0 blob cannot open a live gate.
+`MotherActivity`'s BACK path reaches the same check through `onKeyPress`, and
+`onGuardEscapeKey` gained a leading `Context` parameter for it (call site in
+`KioskKeyGuardService.onKeyEvent`). The release uses the host activity the caller already
+has (`openResetGate(context, host)`), falling back to `MotherActivity.getResumedActivity()`.
 
 ### What counts as "10 quick presses"
 
