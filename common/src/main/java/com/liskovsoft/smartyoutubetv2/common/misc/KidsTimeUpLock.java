@@ -568,9 +568,16 @@ public class KidsTimeUpLock {
 
         Context context = sRolloverContext != null ? sRolloverContext.get() : null;
 
-        if (context == null || !isResetWindowDone(context)) {
-            // Context gone (nothing could write the fresh quota) or the clock jumped: stay
-            // locked — the first key press still opens the gate through its own activity.
+        if (context == null) {
+            // Context gone: nothing could write the fresh quota. Stay locked — the first key
+            // press still opens the gate through its own activity.
+            return;
+        }
+
+        if (!isResetWindowDone(context)) {
+            // The boundary moved (backwards clock correction): wait for the real one, exactly
+            // like onRolloverCheck — otherwise this gate would lose its automatic open.
+            scheduleRolloverCheck(context);
             return;
         }
 
