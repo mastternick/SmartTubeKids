@@ -431,7 +431,10 @@ Counted keys stay BACK / HOME / RECENTS / ESCAPE. The mic / assistant keys are n
 
 ## Night scene after an hour (KIDS v1.10.0-kids)
 
-> **Status (2026-11-11):** implemented on branch `kids`, **UNCOMMITTED** and CI-pending — not released yet.
+> **Status (2026-11-11):** committed on branch `kids` as `8c7fd064`; CI run
+> [43014606413](https://github.com/mastternick/SmartTubeKids/actions/runs/43014606413) green
+> (lint + build, artifact `SmartTubeKids_32.56-kids-83_*`). DEX/arsc verified on that artifact.
+> **Not released; on-device smoke still pending.**
 
 Kids Mode gained a second art choice for the time-up screen: **Night scene after** (`kids_bedtime`).
 Values are **Off** (default) and **18:00 / 19:00 / 20:00 / 21:00 / 22:00 / 23:00**, stored as
