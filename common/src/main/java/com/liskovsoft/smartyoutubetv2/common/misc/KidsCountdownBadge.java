@@ -119,6 +119,7 @@ public class KidsCountdownBadge {
         if (counting
                 && !KidsTimeUpLock.isLocked()
                 && !MileMarkerOverlay.isShown(activity) // v1.9: mile art has its own decor tag
+                && !KidsNightScene.isShown(activity) // v1.10: night scene tag, same reason
                 && !KidsScreenHelper.isBlackScreenShown(activity)
                 && !isInPipMode(activity)) {
             remainingMs = remainingMs(activity, data);

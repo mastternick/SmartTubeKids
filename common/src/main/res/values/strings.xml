@@ -776,6 +776,7 @@
     <string name="kids_mash_pin_desc">When the time limit is used up, 10 quick BACK presses open the PIN prompt. Turn this off to let those 10 presses exit the time-up screen directly.</string>
     <string name="kids_countdown_warning">Remaining-time countdown</string>
     <string name="kids_countdown_off">Off</string>
+    <string name="kids_bedtime">Night scene after</string>
     <string name="kids_calm_exit">Calm exit warnings</string>
     <string name="kids_calm_exit_desc">Show friendly warnings 5, 2 and 1 minute before time is up</string>
     <string name="kids_force_stop">Stop immediately when time is up</string>

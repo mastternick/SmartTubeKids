@@ -13,6 +13,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.base.BasePresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsBedtime; // KIDS v1.10
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsPinGate; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsSidebarManager; // KIDS
@@ -148,6 +149,7 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         appendBlockShortsSwitch(settingsPresenter);
         appendBlockRecommendationsSwitch(settingsPresenter);
         appendTimerCategory(settingsPresenter);
+        appendBedtimeCategory(settingsPresenter); // KIDS v1.10: night scene after this hour
         appendMashPinSwitch(settingsPresenter);
         appendMileMarkerSwitch(settingsPresenter);
         appendResetIntervalCategory(settingsPresenter); // KIDS v1.8: how often the watch limit resets
@@ -433,6 +435,28 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
         }
 
         settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_countdown_warning), options);
+    }
+
+    /**
+     * KIDS v1.10: from this hour on, the time-up screen shows the night scene instead of the
+     * Mile Marker car. Off keeps today's screen at every hour.
+     */
+    private void appendBedtimeCategory(AppDialogPresenter settingsPresenter) {
+        List<OptionItem> options = new ArrayList<>();
+
+        options.add(UiOptionItem.from(
+                getContext().getString(R.string.kids_countdown_off),
+                option -> mKidsData.setBedtimeMinutes(KidsBedtime.OFF),
+                mKidsData.getBedtimeMinutes() == KidsBedtime.OFF));
+
+        for (int hour : KidsBedtime.HOURS) {
+            options.add(UiOptionItem.from(
+                    KidsBedtime.formatHour(hour * 60),
+                    option -> mKidsData.setBedtimeMinutes(hour * 60),
+                    mKidsData.getBedtimeMinutes() == hour * 60));
+        }
+
+        settingsPresenter.appendRadioCategory(getContext().getString(R.string.kids_bedtime), options);
     }
 
     private void appendCalmExitSwitch(AppDialogPresenter settingsPresenter) {

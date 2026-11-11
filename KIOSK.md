@@ -429,6 +429,67 @@ much stricter than "no pause longer than 2 s".
 
 Counted keys stay BACK / HOME / RECENTS / ESCAPE. The mic / assistant keys are never counted.
 
+## Night scene after an hour (KIDS v1.10.0-kids)
+
+> **Status (2026-11-11):** implemented on branch `kids`, **UNCOMMITTED** and CI-pending — not released yet.
+
+Kids Mode gained a second art choice for the time-up screen: **Night scene after** (`kids_bedtime`).
+Values are **Off** (default) and **18:00 / 19:00 / 20:00 / 21:00 / 22:00 / 23:00**, stored as
+minutes-of-day at **blob index 26** (`KidsModeData.mBedtimeMinutes`, default `KidsBedtime.OFF`).
+A blob written by an older build has no index 26 and reads as Off, so no migration was needed;
+a corrupted value sanitizes back to Off.
+
+**When it replaces the car.** Only when the quota gate arms: `KidsModeController.forceStopSession()`
+evaluates `KidsBedtime.isNight(hour, now)` once and calls `KidsTimeUpLock.armNight(activity)` instead of
+`arm(activity, mKidsData.isUseMileMarker())`. On a night gate the scene therefore wins over Mile Marker
+Mode (`SCENE_NIGHT` has precedence). The choice is frozen at arm time exactly like the car is —
+`cover()` redraws the same scene on every re-cover (`applyOnResume`, key presses, dialog dismiss), so the
+clock crossing the bedtime during a running gate never swaps the art underneath the child.
+
+**The window crosses midnight.** Night is `[hour, 06:00)`: `21:00` means 21:00 → 05:59 and the car is back
+at 06:00. The end is `KidsBedtime.NIGHT_END_MINUTES = 360`, a **constant**, deliberately not a second
+setting. 06:00–18:00 keeps the v1.9.8 behaviour.
+
+**What it draws.** `KidsNightScene` adds a view tagged `kids_night_scene` to the activity decor
+(`setClickable(true)`, `setFocusable(false)`, brightness restored like the car does): pure black canvas,
+a deterministic star field with a slow twinkle, a moon with craters and glow, a ground line and a small
+animal curled up asleep with a breathing scale and floating "Z"s — all `Paint`/`Canvas`, no assets.
+After `SCENE_MS = 60_000` it fades over `FADE_MS = 2_000` into the plain black screen at minimum
+brightness, i.e. the "switched off" TV the request asked for. `show(activity, elapsedMs)` needs no
+separate expiry branch in `cover()`: once the elapsed time is already past the minute it goes straight to
+the black screen, so a resume (or a watchdog re-cover) after 60 s shows black instead of restarting the scene.
+
+**Nothing else changes.** The gate underneath is v1.9.8 unchanged: every key is swallowed, ten
+BACK/HOME/RECENTS/ESCAPE presses with at most 2 s between neighbours earn the way out (`KidsTimeUpKeyGate`),
+the PIN dialog appears only while **Ask for the PIN after 10 presses** is ON (otherwise the tenth press
+releases directly), the gate opens by itself at the reset boundary, and the kiosk layers, key guard and
+guardian are untouched. The night scene is **art, not a second lock**: it lives strictly inside the quota
+gate, so with **Stop immediately** off — or with no PIN configured — there is no gate at all and therefore
+no night scene, and the calm exit stays exactly as it was.
+
+Load-bearing details:
+
+- **The wrap is the whole point.** The test must be true at 00:30 for a 21:00 bedtime. A naive
+  `nowMinutes >= bedtimeMinutes` comparison is false there and would hand the car back at 00:30 while the
+  overnight reset window is still running; `KidsBedtime.isNight` compares against `NIGHT_END_MINUTES` in
+  that branch — do not "simplify" it into one comparison.
+- **`isGateActive` deliberately gains no scene term.** The "never trap" release — the first key press
+  releasing a gate the parent disarmed meanwhile — is intentional. A third term there would turn the
+  night scene into a trap if Kids Mode is switched off from another screen.
+- **The fade needs an opaque cover, not scene alpha.** Fading the scene view itself makes its own
+  black canvas transparent and shows the playlist through it for the two seconds; `KidsNightScene`
+  therefore fades a black `kids_night_scene_fade` view in above the artwork (and the backlight down
+  with it). Same family as the v1.2.x overlay bugs: a black screen is only black if something opaque
+  is on top.
+- **The 60 s anchor owns the countdown, not the tick.** `show()` is called by `cover()` on every key
+  press and resume; it posts the tick only in the attach branch. Re-posting there would let a child
+  mashing the remote push the expiry out indefinitely, so the scene would never reach the black
+  screen the request asked for.
+- **One arm helper.** `arm(...)` and `armNight(...)` both delegate to `armQuotaGate(activity, scene)`,
+  which sets `armState()`, the scene and `sNightStartMs`, covers, sets `sQuotaGate = true` and schedules
+  the rollover check. Letting them diverge would silently break the no-PIN release branch
+  (`sQuotaGate && !isPinRequiredAfterMash()`) and the automatic opening at reset.
+
 ## Kiosk key guard after a reboot (KIDS v1.9.6)
 
 **Symptom:** the guard worked once, the TV was restarted, and now the Accessibility switch

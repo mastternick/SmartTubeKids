@@ -2,6 +2,7 @@ package com.liskovsoft.smartyoutubetv2.common.misc;
 
 import android.app.Activity;
 import android.content.Context;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
@@ -55,9 +56,14 @@ public class KidsTimeUpLock {
     // The authorization was granted while the quota was exhausted (the time-up gate): only then
     // does it also suspend the hard stop. A Lock-at-end unlock with quota left must not.
     private static boolean sGateBypassesTimeUp;
-    // Armed-state flag: mile overlay vs classic black screen. Not the pref — a settings change mid-lock
-    // cannot swap the art under the child; next arm re-reads the pref.
-    private static boolean sMileMarkerShown;
+    // Armed-state art: mile overlay, night scene or classic black screen. Not the pref — a settings
+    // change mid-lock cannot swap the art under the child; next arm re-reads the pref.
+    public static final int SCENE_PLAIN = 0;
+    public static final int SCENE_MILE_MARKER = 1;
+    public static final int SCENE_NIGHT = 2;
+    private static int sScene;
+    // KIDS v1.10: uptime the night scene started at — a re-cover continues the same 60 s run.
+    private static long sNightStartMs;
     // KIDS v1.9.4: the quota gate opens itself at the end of the reset window (no PIN).
     // One-shot task + the context it was scheduled with. sQuotaGate distinguishes the
     // quota gate (rollover applies) from Lock-at-end (it does not).
@@ -206,7 +212,7 @@ public class KidsTimeUpLock {
      */
     public static void arm(Activity activity) {
         armState();
-        sMileMarkerShown = false;
+        sScene = SCENE_PLAIN;
         sQuotaGate = false; // KIDS v1.9.4: Lock-at-end is not quota-driven — no rollover task
 
         if (activity != null) {
@@ -222,8 +228,26 @@ public class KidsTimeUpLock {
      * (swallow keys, 10-press mash, PIN) are identical; Lock at end keeps classic black.
      */
     public static void arm(Activity activity, boolean useMileMarker) {
+        armQuotaGate(activity, useMileMarker ? SCENE_MILE_MARKER : SCENE_PLAIN);
+    }
+
+    /**
+     * KIDS v1.10: the quota expired inside the bedtime window — the night scene takes the slot
+     * of the mile marker. The gate is exactly the same: keys swallowed, 10-press mash, PIN,
+     * automatic opening at the end of the reset.
+     */
+    public static void armNight(Activity activity) {
+        armQuotaGate(activity, SCENE_NIGHT);
+    }
+
+    /**
+     * The single quota-gate arm path, so the two atmospheres cannot drift: {@code sQuotaGate}
+     * and the rollover one-shot give the no-PIN branch and the automatic opening at the reset.
+     */
+    private static void armQuotaGate(Activity activity, int scene) {
         armState();
-        sMileMarkerShown = useMileMarker;
+        sScene = scene;
+        sNightStartMs = scene == SCENE_NIGHT ? SystemClock.elapsedRealtime() : 0;
 
         if (activity != null) {
             cover(activity);
@@ -239,12 +263,15 @@ public class KidsTimeUpLock {
             scheduleRolloverCheck(activity);
         }
 
-        Log.d(TAG, "Time-up lock armed (mileMarker=%s)", sMileMarkerShown);
+        Log.d(TAG, "Time-up lock armed (scene=%s)", scene);
     }
 
     /** The art chosen at arm time, re-applied by every re-cover path. */
     private static void cover(Activity activity) {
-        if (sMileMarkerShown) {
+        if (sScene == SCENE_NIGHT) {
+            // Past its 60 s the scene falls back to the black screen on its own.
+            KidsNightScene.show(activity, SystemClock.elapsedRealtime() - sNightStartMs);
+        } else if (sScene == SCENE_MILE_MARKER) {
             MileMarkerOverlay.show(activity);
         } else {
             KidsScreenHelper.showBlackScreen(activity);
@@ -276,13 +303,10 @@ public class KidsTimeUpLock {
             scheduleRolloverCheck(activity);
         }
 
-        if (sMileMarkerShown) {
-            // Idempotent (tick chain guarded) and re-hosts the view on the new activity.
-            MileMarkerOverlay.show(activity);
-        } else if (!KidsScreenHelper.isBlackScreenShown(activity)) {
-            KidsScreenHelper.showBlackScreen(activity);
-            Log.d(TAG, "Time-up lock re-applied on %s", activity.getClass().getSimpleName());
-        }
+        // The art chosen at arm time, re-hosted on the new activity (every show is idempotent
+        // and guarded by its decor tag). The night scene continues its own 60 s run.
+        cover(activity);
+        Log.d(TAG, "Time-up lock re-applied on %s", activity.getClass().getSimpleName());
 
         // KIDS: a mash that completed while no activity could host the dialog (the kiosk
         // key guard swallows HOME even when the app is off screen) is still armed — this
@@ -473,7 +497,8 @@ public class KidsTimeUpLock {
     public static void release(Activity activity) {
         sLocked = false;
         sPinDialogShownAtMs = 0;
-        sMileMarkerShown = false;
+        sScene = SCENE_PLAIN;
+        sNightStartMs = 0;
         sQuotaGate = false;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
@@ -484,6 +509,7 @@ public class KidsTimeUpLock {
         if (activity != null) {
             KidsScreenHelper.hideBlackScreen(activity);
             MileMarkerOverlay.hide(activity);
+            KidsNightScene.clearFor(activity);
             KidsScreenHelper.clearPendingScreenOff();
         }
 
@@ -497,6 +523,8 @@ public class KidsTimeUpLock {
     public static void releaseStateOnly() {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        sScene = SCENE_PLAIN;
+        sNightStartMs = 0;
         sQuotaGate = false;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
@@ -510,6 +538,8 @@ public class KidsTimeUpLock {
         if (activity != null && MileMarkerOverlay.isShown(activity)) {
             MileMarkerOverlay.clearFor(activity);
         }
+        // KIDS v1.10: the night scene has its own decor tag too; a released lock must not leave it.
+        KidsNightScene.clearFor(activity);
     }
 
     /**

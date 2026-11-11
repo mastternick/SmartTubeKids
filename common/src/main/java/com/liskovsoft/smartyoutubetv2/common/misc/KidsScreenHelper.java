@@ -27,7 +27,7 @@ public class KidsScreenHelper {
     private static final String TAG = KidsScreenHelper.class.getSimpleName();
     public static final int BRIGHTNESS_AUTO = -1;
     private static final long DEFAULT_FADE_MS = 2_000;
-    private static final float MIN_BRIGHTNESS = 0.01f; // avoid 0 (some devices blank the display)
+    public static final float MIN_BRIGHTNESS = 0.01f; // avoid 0 (some devices blank the display)
     private static final String OVERLAY_TAG = "kids_screen_off_overlay";
 
     private static boolean sPendingScreenOff;
@@ -175,7 +175,7 @@ public class KidsScreenHelper {
      * Idempotent. Independent from ScreensaverManager (always 100% black).
      */
     public static void showBlackScreen(Activity activity) {
-        if (activity == null || activity.isFinishing()) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
             return;
         }
 

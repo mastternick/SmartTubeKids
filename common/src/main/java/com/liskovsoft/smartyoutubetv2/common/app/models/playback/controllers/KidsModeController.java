@@ -10,6 +10,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.BasePlayerController;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.BrowsePresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsBedtime;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsQuotaWindow;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsScreenHelper;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
@@ -403,7 +404,14 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // it left sQuotaGate false — the gate then could neither open by itself at the reset nor be
         // escaped with one key press (an activity-less arm can happen when the ticker fires while no
         // view is attached; applyOnResume schedules the one-shot on the next resume).
-        KidsTimeUpLock.arm(activity, mKidsData.isUseMileMarker());
+        // KIDS v1.10: inside the bedtime window the night scene takes the time-up slot; the gate
+        // itself (mash, PIN, reset) is identical either way.
+        if (KidsBedtime.isNight(mKidsData.getBedtimeMinutes(),
+                KidsBedtime.minutesOfDay(System.currentTimeMillis()))) {
+            KidsTimeUpLock.armNight(activity);
+        } else {
+            KidsTimeUpLock.arm(activity, mKidsData.isUseMileMarker());
+        }
         presenter.forceFinish();
     }
 

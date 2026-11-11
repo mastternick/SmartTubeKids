@@ -3,6 +3,7 @@ package com.liskovsoft.smartyoutubetv2.common.prefs;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import com.liskovsoft.sharedutils.helpers.Helpers;
+import com.liskovsoft.smartyoutubetv2.common.misc.KidsBedtime;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsQuotaWindow;
 import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock;
 
@@ -63,6 +64,7 @@ public class KidsModeData {
     private boolean mUseMileMarker;
     private boolean mInCooldown; // KIDS v1.9.5: quota exhausted — window re-anchored at expiry, pause until anchor+interval
     private boolean mPinRequiredAfterMash;
+    private int mBedtimeMinutes; // KIDS v1.10: hour after which the time-up screen turns into the night scene (see KidsBedtime)
 
     // Quota counters (persisted so they survive app restarts)
     private long mWindowStartMs;           // epoch ms when the current reset window began
@@ -185,6 +187,25 @@ public class KidsModeData {
             KidsTimeUpLock.invalidateGateAuthorization();
         }
         mPinRequiredAfterMash = required;
+        persistData();
+    }
+
+    // --- Night scene after hour (KIDS v1.10) ---
+
+    /**
+     * KIDS v1.10: minute of day (e.g. 1260 = 21:00) after which the time-up screen shows the
+     * night scene instead of the Mile Marker car. {@link KidsBedtime#OFF} = never.
+     */
+    public int getBedtimeMinutes() {
+        return mBedtimeMinutes;
+    }
+
+    public void setBedtimeMinutes(int minutes) {
+        if (mBedtimeMinutes == minutes) {
+            return;
+        }
+
+        mBedtimeMinutes = minutes;
         persistData();
     }
 
@@ -661,6 +682,7 @@ public class KidsModeData {
         mUseMileMarker        = Helpers.parseBoolean(split, 23, false);
         mInCooldown           = Helpers.parseBoolean(split, 24, false); // KIDS v1.9.5: in cooldown from exhaustion? (default: no)
         mPinRequiredAfterMash = Helpers.parseBoolean(split, 25, true); // KIDS v1.9.6: PIN after 10-press mash (default: yes)
+        mBedtimeMinutes       = sanitize(split, 26, KidsBedtime.allowedMinutes(), KidsBedtime.OFF); // KIDS v1.10: night scene after hour
     }
 
     /**
@@ -688,6 +710,6 @@ public class KidsModeData {
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
                         mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker, mInCooldown,
-                        mPinRequiredAfterMash));
+                        mPinRequiredAfterMash, mBedtimeMinutes));
     }
 }
