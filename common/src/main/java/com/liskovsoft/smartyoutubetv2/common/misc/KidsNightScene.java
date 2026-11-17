@@ -21,17 +21,21 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import java.lang.ref.WeakReference;
 
 /**
- * KIDS v1.10: the night scene shown when the quota expires inside the bedtime window.
+ * KIDS v1.10/v1.11: the night scene shown when the quota expires inside the bedtime window.
  *
  * A silent canvas scene (star sky, moon, a curled sleeping animal) holds for
- * {@link #SCENE_MS}, then fades over {@link #FADE_MS} into the plain black screen — the child
- * is left on a pitch-black, key-swallowing gate exactly like the classic one. The gate itself
- * (10-press mash, PIN, auto-open at the reset) lives in KidsTimeUpLock and is untouched.
+ * {@link #SCENE_MS} (five minutes), then fades over {@link #FADE_MS} into
+ * {@link KidsScreenHelper#showScreenOff} — a black overlay with the backlight at exactly 0, a TV
+ * switched off. The child is left on that key-swallowing gate, which stays armed/locked exactly
+ * like the classic black one. The gate itself (10-press mash, PIN, auto-open at the reset) lives
+ * in KidsTimeUpLock and is untouched.
  *
  * Same host contract as MileMarkerOverlay: decor child under {@link #TAG}, MATCH_PARENT,
- * clickable so touches are swallowed, never focusable. The 60 s run is anchored in uptime in
- * KidsTimeUpLock, so a re-cover on another activity continues the same scene instead of
- * restarting it (and past the 60 s it goes straight to the black screen).
+ * clickable so touches are swallowed, never focusable. The five-minute run is anchored in uptime
+ * in KidsTimeUpLock, so a re-cover on another activity continues the same scene instead of
+ * restarting it (and past the five minutes it goes straight to the switched-off screen). The
+ * countdown holds still while {@link KidsTimeUpLock#isPinDialogOpen()}: the parent may earn the PIN
+ * dialog during the last seconds of the scene, and the panel must not go dark under it.
  *
  * Main thread only.
  */
@@ -41,7 +45,7 @@ public class KidsNightScene {
     // The fade runs on an opaque black cover ABOVE the artwork: fading the scene view itself
     // would make its own black canvas transparent and reveal the playlist underneath.
     private static final String FADE_TAG = "kids_night_scene_fade";
-    private static final long SCENE_MS = 60_000L;
+    private static final long SCENE_MS = 5 * 60_000L;
     private static final long FADE_MS = 2_000L;
     private static final long TICK_MS = 1_000L;
 
@@ -65,9 +69,18 @@ public class KidsNightScene {
         }
 
         if (elapsedMs >= SCENE_MS) {
-            // The scene is over: the gate wants the plain black screen, not a replayed night.
+            // The scene is over: the gate wants the switched-off screen, not a replayed night —
+            // but never under an open PIN dialog: the classic black overlay holds, the configured
+            // brightness stays untouched under the dialog, and the next cover after dismissal
+            // applies the switched-off state.
             clearFor(activity);
-            KidsScreenHelper.showBlackScreen(activity);
+
+            if (KidsTimeUpLock.isPinDialogOpen()) {
+                KidsScreenHelper.showBlackScreenKeepBrightness(activity);
+            } else {
+                KidsScreenHelper.showScreenOff(activity);
+            }
+
             return;
         }
 
@@ -92,7 +105,7 @@ public class KidsNightScene {
                     new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
             // Scheduled once per attach: cover() also runs on every key press, and re-posting
-            // the tick there would let a mashing child push the 60 s expiry out forever. The
+            // the tick there would let a mashing child push the expiry out forever. The
             // anchor (sStartMs), not the tick, owns the countdown.
             Utils.postDelayed(sTick, TICK_MS);
         }
@@ -174,6 +187,13 @@ public class KidsNightScene {
             return;
         }
 
+        if (KidsTimeUpLock.isPinDialogOpen()) {
+            // The parent is typing the PIN: never pull the panel dark under the dialog. The anchor
+            // keeps running, so the fade lands the moment the dialog is gone.
+            Utils.postDelayed(sTick, TICK_MS);
+            return;
+        }
+
         if (SystemClock.elapsedRealtime() - sStartMs >= SCENE_MS) {
             startFade(activity);
             return;
@@ -188,7 +208,7 @@ public class KidsNightScene {
         ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
 
         if (decor.findViewWithTag(TAG) == null) {
-            KidsScreenHelper.showBlackScreen(activity);
+            KidsScreenHelper.showScreenOff(activity);
             return;
         }
 
@@ -215,7 +235,8 @@ public class KidsNightScene {
             float fraction = (float) animation.getAnimatedValue();
 
             fadeCover.setAlpha(fraction);
-            setBrightness(activity, fromBrightness + (KidsScreenHelper.MIN_BRIGHTNESS - fromBrightness) * fraction);
+            // Fade the backlight all the way to 0: the end state is a switched-off TV, not a dim panel.
+            setBrightness(activity, fromBrightness * (1f - fraction));
         });
         animator.addListener(new AnimatorListenerAdapter() {
             @Override
@@ -227,8 +248,8 @@ public class KidsNightScene {
                 sFade = null;
                 detach(activity, TAG);
                 detach(activity, FADE_TAG);
-                KidsScreenHelper.showBlackScreen(activity);
-                Log.d(LOG_TAG, "Night scene over: black screen");
+                KidsScreenHelper.showScreenOff(activity);
+                Log.d(LOG_TAG, "Night scene over: screen off");
             }
         });
 
@@ -249,7 +270,8 @@ public class KidsNightScene {
         }
 
         WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
-        lp.screenBrightness = Math.max(KidsScreenHelper.MIN_BRIGHTNESS, brightness);
+        // The fade must be able to reach a fully dark panel: no MIN_BRIGHTNESS floor here.
+        lp.screenBrightness = Math.max(0f, Math.min(1f, brightness));
         activity.getWindow().setAttributes(lp);
     }
 

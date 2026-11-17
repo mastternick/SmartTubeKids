@@ -110,8 +110,11 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         // KIDS: daily limit already reached — don't start new videos
         if (isTimeExpired()) {
-            if (isForceStopActive()) {
-                // KIDS: hard stop — never even start the clip, lock the screen instead
+            // KIDS v1.11: with "stop immediately" OFF the running clip is still allowed to
+            // finish, but a REFUSED new clip inside the night window must end on the
+            // cat-then-black gate exactly like the hard stop.
+            if (isForceStopActive() || isBedtimeLockDue()) {
+                // KIDS: hard stop / night window — never even start the clip, lock the screen instead
                 forceStopSession();
                 return;
             }
@@ -259,7 +262,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // KIDS: the clip ran to its natural end with the quota full and the hard stop
         // armed (e.g. the switch was turned on mid-clip) → lock the screen exactly like
         // the watchdog does, instead of the calm fade back to the playlist.
-        if (isTimeExpired() && isForceStopActive()) {
+        // KIDS v1.11: inside the night window the exhausted clip ends on the night gate even
+        // with the switch OFF — the cat, then the switched-off black screen, locked.
+        if (isTimeExpired() && (isForceStopActive() || isBedtimeLockDue())) {
             forceStopSession();
             return;
         }
@@ -319,6 +324,18 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      */
     private boolean isForceStopActive() {
         return KidsTimeUpLock.isForceStopActive(getContext());
+    }
+
+    /**
+     * KIDS v1.11: the night lock is due — inside the "night scene after" window AND no parent gate
+     * authorization in effect. `KidsTimeUpLock.isGateUnlocked()` is the same 10-minute window that
+     * suspends the hard stop, so a parent who just typed the PIN is not re-locked by the next video.
+     */
+    private boolean isBedtimeLockDue() {
+        return mKidsData != null
+                && !KidsTimeUpLock.isGateUnlocked()
+                && KidsBedtime.isNight(mKidsData.getBedtimeMinutes(),
+                        KidsBedtime.minutesOfDay(System.currentTimeMillis()));
     }
 
     /**
@@ -425,8 +442,7 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         // view is attached; applyOnResume schedules the one-shot on the next resume).
         // KIDS v1.10: inside the bedtime window the night scene takes the time-up slot; the gate
         // itself (mash, PIN, reset) is identical either way.
-        if (KidsBedtime.isNight(mKidsData.getBedtimeMinutes(),
-                KidsBedtime.minutesOfDay(System.currentTimeMillis()))) {
+        if (isBedtimeLockDue()) {
             KidsTimeUpLock.armNight(activity);
         } else {
             KidsTimeUpLock.arm(activity, mKidsData.isUseMileMarker());

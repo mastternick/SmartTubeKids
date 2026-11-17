@@ -5,6 +5,8 @@ import android.content.Context;
 import android.os.SystemClock;
 import android.view.KeyEvent;
 
+import androidx.appcompat.app.AlertDialog;
+
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.smartyoutubetv2.common.R;
@@ -17,7 +19,8 @@ import java.lang.ref.WeakReference;
 
 /**
  * KIDS: PIN-locked black screen shown when the daily watch limit expires with
- * "stop immediately" (force stop) enabled.
+ * "stop immediately" (force stop) enabled — also, since v1.11, inside the bedtime
+ * window even with that switch off ({@link #isBedtimeGateActive}).
  *
  * Difference from the calm exit: there the black screen is only a transition — the
  * first key press removes it and the child is back on the playlist. Here the screen
@@ -62,8 +65,18 @@ public class KidsTimeUpLock {
     public static final int SCENE_MILE_MARKER = 1;
     public static final int SCENE_NIGHT = 2;
     private static int sScene;
-    // KIDS v1.10: uptime the night scene started at — a re-cover continues the same 60 s run.
+    // KIDS v1.10: uptime the night scene started at — a re-cover continues the same five-minute run.
     private static long sNightStartMs;
+    // KIDS v1.11: the night lock — a quota gate armed inside the bedtime window even with
+    // "Stop immediately" OFF. The hard stop is not the reason there, so isGateActive needs this
+    // third term; cleared wherever the gate is dropped, planted by armQuotaGate for SCENE_NIGHT.
+    private static boolean sBedtimeLock;
+    // KIDS v1.11: the live PIN dialog. The night scene must not pull the backlight to 0 under it
+    // (the parent would lose a prompt they earned), so its countdown waits the dialog out. A weak
+    // reference to the real dialog — not a boolean or a timeout — because SimpleEditDialog swallows
+    // a BadTokenException and returns without ever dismissing: neither a flag nor a timer can tell
+    // "still on screen" from "never showed", `isShowing()` can.
+    private static WeakReference<AlertDialog> sPinDialog;
     // KIDS v1.9.4: the quota gate opens itself at the end of the reset window (no PIN).
     // One-shot task + the context it was scheduled with. sQuotaGate distinguishes the
     // quota gate (rollover applies) from Lock-at-end (it does not).
@@ -124,6 +137,12 @@ public class KidsTimeUpLock {
         return sLocked;
     }
 
+    /** KIDS v1.11: is the PIN dialog on screen right now? */
+    public static boolean isPinDialogOpen() {
+        AlertDialog dialog = sPinDialog != null ? sPinDialog.get() : null;
+        return dialog != null && dialog.isShowing();
+    }
+
     /**
      * @return true when force stop is armed: Kids Mode on, the "stop immediately"
      *         switch on, a PIN available to unlock the screen with, AND the hard stop is not
@@ -154,15 +173,36 @@ public class KidsTimeUpLock {
     }
 
     /**
-     * KIDS: does the PIN gate apply at all right now? True when EITHER reason is armed —
-     * the quota force stop ({@link #isForceStopActive}) or the end-of-video lock
-     * ({@link #isLockAtEndActive}).
+     * KIDS: does the PIN gate apply at all right now? True when EITHER of the three reasons is
+     * armed — the quota force stop ({@link #isForceStopActive}), the end-of-video lock
+     * ({@link #isLockAtEndActive}) or the night lock ({@link #isBedtimeGateActive}).
      *
      * Used by the gate itself (releasing on the first key press when no reason is armed
      * any more, so nobody is ever trapped).
      */
     public static boolean isGateActive(Context context) {
-        return isForceStopActive(context) || isLockAtEndActive(context);
+        return isForceStopActive(context) || isLockAtEndActive(context) || isBedtimeGateActive(context);
+    }
+
+    /**
+     * KIDS v1.11: the gate armed inside the bedtime window holds even when the hard stop is off.
+     * Same base as every other reason (`isKidsGateBase`: Kids Mode + a PIN to unlock with), so
+     * turning either off still releases it — the "never trap" invariant stays intact.
+     *
+     * Deliberately NO quota predicate here: the gate must behave exactly like the hard-stop gate
+     * and `isForceStopActive` does not consult the quota either. Every release path clears
+     * `sBedtimeLock` (PIN unlock, the automatic open at the reset boundary, per-step
+     * `openResetGate`, a parent bonus via `releaseStateOnly`, Kids Mode or PIN switched off), and a
+     * quota rollover that lands on an unhandled key press still goes through the
+     * `sQuotaGate && isResetWindowDone(activity)` branch of `onKeyPress`/`onGuardEscapeKey`. A quota
+     * predicate would instead release the gate on the first key press of a rolled-over window
+     * WITHOUT writing the fresh quota, so the child would land on a screen that re-locks on the
+     * next play attempt.
+     */
+    private static boolean isBedtimeGateActive(Context context) {
+        return sBedtimeLock
+                && !isGateUnlocked()
+                && isKidsGateBase(context);
     }
 
     /**
@@ -248,6 +288,7 @@ public class KidsTimeUpLock {
         armState();
         sScene = scene;
         sNightStartMs = scene == SCENE_NIGHT ? SystemClock.elapsedRealtime() : 0;
+        sBedtimeLock = scene == SCENE_NIGHT;
 
         if (activity != null) {
             cover(activity);
@@ -269,7 +310,7 @@ public class KidsTimeUpLock {
     /** The art chosen at arm time, re-applied by every re-cover path. */
     private static void cover(Activity activity) {
         if (sScene == SCENE_NIGHT) {
-            // Past its 60 s the scene falls back to the black screen on its own.
+            // Past its five minutes the scene falls back to the switched-off screen on its own.
             KidsNightScene.show(activity, SystemClock.elapsedRealtime() - sNightStartMs);
         } else if (sScene == SCENE_MILE_MARKER) {
             MileMarkerOverlay.show(activity);
@@ -284,6 +325,7 @@ public class KidsTimeUpLock {
      */
     public static void armState() {
         sLocked = true;
+        sBedtimeLock = false; // a fresh arm of any scene starts without it
         KidsTimeUpKeyGate.resetSequence(); // a fresh time-out costs a fresh 10 presses
     }
 
@@ -388,8 +430,16 @@ public class KidsTimeUpLock {
             return;
         }
 
+        // KIDS v1.11: one prompt at a time. The throttle below expires after 30 s, so a kiosk-swallowed
+        // HOME/RECENTS mash could stack a second dialog and replace the tracked reference; cancelling
+        // that one would then null the reference while the first prompt is still on screen, and the
+        // night scene would darken the panel under it.
+        if (isPinDialogOpen()) {
+            return; // stays armed, the prompt already owns the screen
+        }
+
         if (System.currentTimeMillis() - sPinDialogShownAtMs < PIN_DIALOG_THROTTLE_MS) {
-            return; // dialog already open (or its failure is still fresh); stays armed
+            return; // a failed show attempt is still fresh; stays armed
         }
 
         sPinDialogShownAtMs = System.currentTimeMillis();
@@ -398,7 +448,12 @@ public class KidsTimeUpLock {
         // again, so a cancel/BACK on the dialog does not pop it back up for free.
         KidsTimeUpKeyGate.resetSequence();
 
-        SimpleEditDialog.showPassword(
+        // KIDS v1.11: after the night scene the window brightness is 0 (a switched-off TV). Restore
+        // the configured level before the dialog owns the screen, otherwise the parent is asked for
+        // the PIN on a panel that is still dark. A cancel re-covers and dims it again (cover()).
+        KidsScreenHelper.applyBrightness(activity);
+
+        AlertDialog pinDialog = SimpleEditDialog.showPassword(
                 activity,
                 activity.getString(R.string.kids_enter_pin),
                 activity.getString(R.string.kids_time_up_pin_hint),
@@ -419,16 +474,24 @@ public class KidsTimeUpLock {
                 () -> {
                     // Cancel/BACK: still locked, still black. The throttle is cleared so the
                     // gate can arm again — but a fresh 10 escapes are required, the PIN does
-                    // not come back for free (KidsTimeUpKeyGate.resetSequence above).
+                    // not come back for free.
                     // NOTE: this also fires after a SUCCESSFUL unlock (dismiss), hence the
                     // sLocked guard — re-covering there would trap the parent who just typed
                     // the correct PIN.
+                    sPinDialog = null;
                     sPinDialogShownAtMs = 0;
+                    // KIDS v1.11: the reset at dialog-open only covers presses made BEFORE it.
+                    // A kiosk-swallowed HOME/RECENTS mash that landed while the prompt was open
+                    // leaves the sequence armed; without this, one BACK right after a cancel
+                    // would pop the PIN again instead of costing ten fresh presses.
+                    KidsTimeUpKeyGate.resetSequence();
 
                     if (sLocked) {
                         cover(activity);
                     }
                 });
+
+        sPinDialog = pinDialog != null ? new WeakReference<>(pinDialog) : null;
     }
 
     /**
@@ -500,6 +563,8 @@ public class KidsTimeUpLock {
         sScene = SCENE_PLAIN;
         sNightStartMs = 0;
         sQuotaGate = false;
+        sBedtimeLock = false;
+        sPinDialog = null;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
         Utils.removeCallbacks(sOpenGateTask);
@@ -526,6 +591,8 @@ public class KidsTimeUpLock {
         sScene = SCENE_PLAIN;
         sNightStartMs = 0;
         sQuotaGate = false;
+        sBedtimeLock = false;
+        sPinDialog = null;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
         Utils.removeCallbacks(sOpenGateTask);

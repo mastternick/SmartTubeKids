@@ -469,9 +469,10 @@ the black screen, so a resume (or a watchdog re-cover) after 60 s shows black in
 BACK/HOME/RECENTS/ESCAPE presses with at most 2 s between neighbours earn the way out (`KidsTimeUpKeyGate`),
 the PIN dialog appears only while **Ask for the PIN after 10 presses** is ON (otherwise the tenth press
 releases directly), the gate opens by itself at the reset boundary, and the kiosk layers, key guard and
-guardian are untouched. The night scene is **art, not a second lock**: it lives strictly inside the quota
-gate, so with **Stop immediately** off — or with no PIN configured — there is no gate at all and therefore
-no night scene, and the calm exit stays exactly as it was.
+guardian are untouched. In v1.10.0 the night scene was **art, not a second lock**: it lived strictly
+inside the quota gate, so with **Stop immediately** off there was no gate at all and therefore no night
+scene. **Superseded by v1.11.0** (next section): the night gate now arms from the time-up decisions
+themselves and holds with that switch off. The no-PIN case still self-releases on the first key press.
 
 Load-bearing details:
 
@@ -479,9 +480,10 @@ Load-bearing details:
   `nowMinutes >= bedtimeMinutes` comparison is false there and would hand the car back at 00:30 while the
   overnight reset window is still running; `KidsBedtime.isNight` compares against `NIGHT_END_MINUTES` in
   that branch — do not "simplify" it into one comparison.
-- **`isGateActive` deliberately gains no scene term.** The "never trap" release — the first key press
-  releasing a gate the parent disarmed meanwhile — is intentional. A third term there would turn the
-  night scene into a trap if Kids Mode is switched off from another screen.
+- **`isGateActive` gained no scene term in v1.10.** The "never trap" release — the first key press
+  releasing a gate the parent disarmed meanwhile — is intentional. v1.11 adds a scene term, but only as
+  `isBedtimeGateActive()` (guarded by `isKidsGateBase` + `!isGateUnlocked()`), never
+  as "a scene view is on screen"; see the next section.
 - **The fade needs an opaque cover, not scene alpha.** Fading the scene view itself makes its own
   black canvas transparent and shows the playlist through it for the two seconds; `KidsNightScene`
   therefore fades a black `kids_night_scene_fade` view in above the artwork (and the backlight down
@@ -495,6 +497,73 @@ Load-bearing details:
   which sets `armState()`, the scene and `sNightStartMs`, covers, sets `sQuotaGate = true` and schedules
   the rollover check. Letting them diverge would silently break the no-PIN release branch
   (`sQuotaGate && !isPinRequiredAfterMash()`) and the automatic opening at reset.
+
+## Night scene holds five minutes, then the TV is off (KIDS v1.11.0-kids)
+
+**The bug.** With **Stop immediately when time is up** OFF the time-up never reached the gate: the
+expired clip took the calm-exit path (fade + `setPendingScreenOff()` + `forceFinish()`), the next
+playlist load was refused with a message, and no cat ever appeared — the night art was reachable only
+through `forceStopSession()`, i.e. only with that switch ON.
+
+**The fix.** The night gate now arms from the same two time-up decisions the hard stop uses, and the
+switch is no longer a precondition for the NIGHT art:
+
+- `KidsModeController.onNewVideo` — quota expired and `isForceStopActive() || isBedtimeLockDue()` → a
+  refused clip ends on the cat-then-black gate (with the switch OFF the clip already running is still
+  allowed to finish, as before).
+- `KidsModeController.onVideoSessionEnd` — the exhausted clip ending calls `forceStopSession()` when
+  `isTimeExpired() && (isForceStopActive() || isBedtimeLockDue())`. This is the path the report hit.
+- `isBedtimeLockDue()` is the one place the bedtime test lives now (`KidsBedtime.isNight` inside, false
+  when `KidsModeData.getBedtimeMinutes()` is Off); `forceStopSession()` uses it too. It also requires
+  `!KidsTimeUpLock.isGateUnlocked()`: during the parent's 10-minute gate authorization the night gate
+  does not re-arm, exactly like the hard stop (which `isForceStopActive` already lapses then), so an
+  authenticated parent is not re-locked by the next refused clip.
+
+**Five minutes, then a switched-off TV.** `KidsNightScene.SCENE_MS = 5 * 60_000L`; the run is still
+anchored in uptime (`KidsTimeUpLock.sNightStartMs`), so re-covers continue it and a resume past the
+five minutes goes straight to the end state. After `FADE_MS` (2 s, opaque cover + backlight down) the
+scene hands over to `KidsScreenHelper.showScreenOff(activity)`: black overlay **plus window brightness
+exactly 0**, indistinguishable from a TV switched off. `KidsNightScene.setBrightness` therefore clamps
+to `[0, 1]` instead of flooring at `MIN_BRIGHTNESS` — the fade must reach a dark panel.
+
+**The gate stays locked underneath.** `KidsTimeUpLock` keeps `sLocked`, swallows every key, requires
+the 10-press mash and — while **Ask for the PIN after 10 presses** is ON — the PIN (otherwise the
+tenth press releases directly), and re-opens by itself at the reset boundary: the same gate as
+v1.10, only the art changes. While the PIN dialog is on screen the five-minute countdown holds still
+— and "on screen" is the live dialog itself, `KidsTimeUpLock.isPinDialogOpen()` reading the stored
+`AlertDialog.isShowing()` (`SimpleEditDialog.showPassword` now returns the dialog, `null` when the
+`show()` call threw), so a swallowed `BadTokenException` cannot leave the scene frozen forever and a
+genuinely open dialog is never darkened. During that time `KidsNightScene.show()` re-applies the black
+overlay with `KidsScreenHelper.showBlackScreenKeepBrightness`, which leaves the configured window
+brightness alone — a key-press re-cover (or a guard-swallowed HOME) cannot dim the panel under the
+prompt. Dismissal re-covers into the switched-off state.
+
+**One prompt at a time.** `onKeyPress` returns before opening a dialog when `isPinDialogOpen()` — the
+30 s throttle alone is not enough: a kiosk-swallowed HOME/RECENTS mash after it lapsed would stack a
+second prompt and replace the tracked reference, and cancelling that one would null the reference
+while the first prompt is still on screen (the scene would then darken the panel under it). The
+throttle stays for the other case it was written for: a `show()` that failed, whose prompt never
+appeared.
+
+**Why `showScreenOff` re-applies brightness on every call.** The overlay is idempotent, the brightness
+is not: a resumed activity, a `KidsScreenHelper.applyBrightness` from a settings change or a parent
+brightness restore would otherwise leave the "switched off" screen glowing at a visible level. For the
+same reason `KidsTimeUpLock.onKeyPress` calls `KidsScreenHelper.applyBrightness(activity)` immediately
+before `SimpleEditDialog.showPassword(...)` — a PIN prompt on a panel that is still at 0 is a trap.
+A cancel re-covers (`cover()`) and dims it again.
+
+**The safety invariant.** The gate holds with **Stop immediately** OFF because `isGateActive()` now has
+a third reason, `KidsTimeUpLock.isBedtimeGateActive()` (`sBedtimeLock` + `!isGateUnlocked()` +
+`isKidsGateBase()`), planted by `armQuotaGate` for `SCENE_NIGHT` and cleared in
+`release()`/`releaseStateOnly()`/`armState()`. With no PIN configured — or Kids Mode off —
+`isKidsGateBase()` is false, so the first key press still releases the gate: no trap. It ends on any
+release path (PIN unlock, the automatic open at the reset boundary, `openResetGate`, a parent bonus,
+Kids Mode or the PIN switched off), not on a quota check — the helper deliberately has no
+`isQuotaExhausted` term, exactly like `isForceStopActive`: a rolled-over window reached through an
+unhandled key press must still go through the `sQuotaGate && isResetWindowDone` branch that writes the
+fresh quota, otherwise the child would land on a screen that re-locks on the next play attempt.
+
+> **Status:** implemented on branch `kids`, CI build pending, on-device smoke pending.
 
 ## Reset pause starts when the exhausted clip stops (KIDS v1.10 fix)
 

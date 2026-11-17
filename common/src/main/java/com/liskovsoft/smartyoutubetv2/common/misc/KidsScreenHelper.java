@@ -173,16 +173,58 @@ public class KidsScreenHelper {
     /**
      * Show a full-black overlay on the activity and drop the backlight to the minimum.
      * Idempotent. Independent from ScreensaverManager (always 100% black).
+     * The screen stays black until a key press.
      */
     public static void showBlackScreen(Activity activity) {
-        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+        if (!showOverlay(activity)) {
             return;
+        }
+
+        setWindowBrightness(activity, MIN_BRIGHTNESS);
+
+        Log.d(TAG, "Black screen shown until first key press");
+    }
+
+    /**
+     * KIDS v1.11: pitch black with the backlight at exactly 0, indistinguishable from a TV that
+     * was switched off. Unlike {@link #showBlackScreen} (which keeps {@link #MIN_BRIGHTNESS} so the
+     * panel stays awake) this is the terminal state of the night scene only.
+     *
+     * Idempotent on the overlay BUT the brightness is re-applied on every call, so a resumed
+     * activity or a parent brightness restore cannot leave the "switched off" screen glowing.
+     */
+    public static void showScreenOff(Activity activity) {
+        if (!showOverlay(activity)) {
+            return;
+        }
+
+        setWindowBrightness(activity, 0f);
+
+        Log.d(TAG, "Screen off (night scene over)");
+    }
+
+    /**
+     * KIDS v1.11: the black overlay WITHOUT touching the window brightness. Used while the PIN
+     * dialog is on screen: `showBlackScreen`'s MIN_BRIGHTNESS would dim the panel under a prompt
+     * the parent just earned, and the brightness they restored must survive a key-press re-cover.
+     */
+    public static void showBlackScreenKeepBrightness(Activity activity) {
+        showOverlay(activity);
+    }
+
+    /**
+     * @return true when the overlay is present or was just added; false when the activity cannot
+     * host it (null, finishing, destroyed).
+     */
+    private static boolean showOverlay(Activity activity) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return false;
         }
 
         ViewGroup decor = (ViewGroup) activity.getWindow().getDecorView();
 
         if (decor.findViewWithTag(OVERLAY_TAG) != null) {
-            return; // already shown
+            return true; // already shown
         }
 
         View overlay = new View(activity);
@@ -193,11 +235,17 @@ public class KidsScreenHelper {
         decor.addView(overlay,
                 new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
-        lp.screenBrightness = MIN_BRIGHTNESS;
-        activity.getWindow().setAttributes(lp);
+        return true;
+    }
 
-        Log.d(TAG, "Black screen shown until first key press");
+    private static void setWindowBrightness(Activity activity, float brightness) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return;
+        }
+
+        WindowManager.LayoutParams lp = activity.getWindow().getAttributes();
+        lp.screenBrightness = brightness;
+        activity.getWindow().setAttributes(lp);
     }
 
     /**

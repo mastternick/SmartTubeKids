@@ -16,38 +16,38 @@ public class SimpleEditDialog {
         boolean onChange(String newValue);
     }
 
-    public static void show(Context context, String dialogTitle, String defaultValue, OnChange onChange) {
-        show(context, dialogTitle, dialogTitle, defaultValue, onChange, null);
+    public static AlertDialog show(Context context, String dialogTitle, String defaultValue, OnChange onChange) {
+        return show(context, dialogTitle, dialogTitle, defaultValue, onChange, null);
     }
 
-    public static void show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange) {
-        show(context, dialogTitle, dialogHint, defaultValue, onChange, null);
+    public static AlertDialog show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange) {
+        return show(context, dialogTitle, dialogHint, defaultValue, onChange, null);
     }
 
-    public static void show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss) {
-        show(context, dialogTitle, dialogHint, defaultValue, onChange, onDismiss, false);
+    public static AlertDialog show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss) {
+        return show(context, dialogTitle, dialogHint, defaultValue, onChange, onDismiss, false);
     }
 
-    public static void showPassword(Context context, String dialogTitle, String defaultValue, OnChange onChange) {
-        showPassword(context, dialogTitle, defaultValue, onChange, null);
+    public static AlertDialog showPassword(Context context, String dialogTitle, String defaultValue, OnChange onChange) {
+        return showPassword(context, dialogTitle, defaultValue, onChange, null);
     }
 
     // KIDS: password dialog with custom hint
-    public static void showPassword(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange) {
-        show(context, dialogTitle, dialogHint, defaultValue, onChange, null, true);
+    public static AlertDialog showPassword(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange) {
+        return show(context, dialogTitle, dialogHint, defaultValue, onChange, null, true);
     }
 
     // KIDS: password dialog with custom hint AND dismiss callback (needed when the
     // caller must clean up state on cancel, e.g. the time-up PIN lock)
-    public static void showPassword(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss) {
-        show(context, dialogTitle, dialogHint, defaultValue, onChange, onDismiss, true);
+    public static AlertDialog showPassword(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss) {
+        return show(context, dialogTitle, dialogHint, defaultValue, onChange, onDismiss, true);
     }
 
-    public static void showPassword(Context context, String dialogTitle, String defaultValue, OnChange onChange, Runnable onDismiss) {
-        show(context, dialogTitle, dialogTitle, defaultValue, onChange, onDismiss, true);
+    public static AlertDialog showPassword(Context context, String dialogTitle, String defaultValue, OnChange onChange, Runnable onDismiss) {
+        return show(context, dialogTitle, dialogTitle, defaultValue, onChange, onDismiss, true);
     }
 
-    private static void show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss, boolean isPassword) {
+    private static AlertDialog show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss, boolean isPassword) {
         AlertDialog.Builder builder = new AlertDialog.Builder(context, R.style.AppDialog);
         LayoutInflater inflater = LayoutInflater.from(context);
         View contentView = inflater.inflate(R.layout.simple_edit_dialog, null);
@@ -98,7 +98,7 @@ public class SimpleEditDialog {
             // RuntimeException: InputChannel is not initialized
             e.printStackTrace();
             MessageHelpers.showMessage(context, e.getMessage());
-            return;
+            return null;
         }
 
         configDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener((view) -> {
@@ -120,5 +120,7 @@ public class SimpleEditDialog {
         configDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener((view) -> configDialog.dismiss());
 
         //editField.setNextFocusDownId(configDialog.getButton(AlertDialog.BUTTON_POSITIVE).getId()); // OK button
+
+        return configDialog;
     }
 }
