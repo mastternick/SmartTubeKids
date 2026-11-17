@@ -358,7 +358,8 @@ Load-bearing rules (do not "simplify" them away):
   re-cover path (`applyOnResume`, `onKeyPress`, the dialog-dismiss callback)
   routes through `cover()`, so a settings change mid-lock cannot swap the art
   under the child. The "Lock at end" mode deliberately keeps the classic black
-  screen — only the timer path passes the pref.
+  screen — only the timer path passes the pref (at bedtime it now gets the night
+  art instead: see v1.11.0 below).
 - **Separate decor tag.** The scene is tagged `mile_marker_overlay`, NOT the
   black screen's `kids_screen_off_overlay`. Anything that checks for a visible
   time-up cover must look for BOTH — that is why the countdown badge also
@@ -540,6 +541,12 @@ genuinely open dialog is never darkened. During that time `KidsNightScene.show()
 overlay with `KidsScreenHelper.showBlackScreenKeepBrightness`, which leaves the configured window
 brightness alone — a key-press re-cover (or a guard-swallowed HOME) cannot dim the panel under the
 prompt. Dismissal re-covers into the switched-off state.
+
+**Lock at end gets the art too.** `lockScreenAtVideoEnd()` calls
+`KidsTimeUpLock.armNightArt(activity)` when `isBedtimeLockDue()`, else the classic `arm(activity)`.
+Art only: `sQuotaGate`/`sBedtimeLock` stay false, so the lock keeps its v1.7.5 semantics — the reset
+boundary never opens it, the mash opt-out does not apply (PIN always), and gate activity still comes
+from `isLockAtEndActive`. Five minutes of cat, then the switched-off screen, same re-cover anchor.
 
 **One prompt at a time.** `onKeyPress` returns before opening a dialog when `isPinDialogOpen()` — the
 30 s throttle alone is not enough: a kiosk-swallowed HOME/RECENTS mash after it lapsed would stack a

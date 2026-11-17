@@ -456,6 +456,8 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      *
      * Same shape as {@link #forceStopSession()} minus the timer-specific bits: no time-up
      * message (the quota did not expire) and nothing to silence (the clip already ended).
+     * KIDS v1.11: at bedtime the art is the night scene while the gate stays lock-at-end —
+     * art only, no reset auto-open.
      * The gate is armed BEFORE the fade so a queued next clip cannot clear the screen
      * behind our back, and the overlay survives the player activity
      * ({@code KidsTimeUpLock.applyOnResume} in MotherActivity), exactly like the hard stop.
@@ -470,9 +472,21 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         KidsTimeUpLock.armState();
 
         final Activity activity = getActivity();
+        // Decided once: the 2 s fade must not let a clock crossing change the art the log reports.
+        final boolean nightArt = isBedtimeLockDue();
 
         Runnable lockAndFinish = () -> {
-            KidsTimeUpLock.arm(activity);
+            // KIDS v1.11: inside the bedtime window the end-of-clip lock uses the same art as the
+            // quota gate (the cat, then the switched-off screen), but armed as ART ONLY: this lock
+            // is not quota-driven, so it must keep the v1.7.5 semantics — no automatic opening at the
+            // reset boundary, and the PIN is always required (the mash opt-out covers the time limit
+            // only).
+            if (nightArt) {
+                KidsTimeUpLock.armNightArt(activity);
+            } else {
+                KidsTimeUpLock.arm(activity);
+            }
+
             presenter.forceFinish();
         };
 
@@ -482,7 +496,8 @@ public class KidsModeController extends BasePlayerController implements TickleMa
             lockAndFinish.run();
         }
 
-        Log.d(TAG, "KIDS: end-of-video lock armed, screen stays black behind the PIN");
+        Log.d(TAG, "KIDS: end-of-video lock armed, screen stays black behind the PIN (art=%s)",
+                nightArt ? "SCENE_NIGHT" : "SCENE_PLAIN");
     }
 
     /**

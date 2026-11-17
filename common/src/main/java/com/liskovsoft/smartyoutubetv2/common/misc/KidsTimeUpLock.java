@@ -265,7 +265,9 @@ public class KidsTimeUpLock {
     /**
      * KIDS v1.9: with {@code useMileMarker} the time-up black screen is replaced by the
      * night-road overlay reflecting the real reset-window progress. The gate semantics
-     * (swallow keys, 10-press mash, PIN) are identical; Lock at end keeps classic black.
+     * (swallow keys, 10-press mash, PIN) are identical; Lock at end keeps classic black
+     * (v1.11: inside the bedtime window it gets the night art through
+     * {@link #armNightArt(Activity)}, still without the quota-gate semantics).
      */
     public static void arm(Activity activity, boolean useMileMarker) {
         armQuotaGate(activity, useMileMarker ? SCENE_MILE_MARKER : SCENE_PLAIN);
@@ -278,6 +280,27 @@ public class KidsTimeUpLock {
      */
     public static void armNight(Activity activity) {
         armQuotaGate(activity, SCENE_NIGHT);
+    }
+
+    /**
+     * KIDS v1.11: the night ART without the quota-gate semantics — used by "Lock at end" inside the
+     * bedtime window. `sQuotaGate` stays false and `sBedtimeLock` stays false on purpose: this lock
+     * is driven by the playback mode (`isLockAtEndActive`), so the reset boundary must NOT open it by
+     * itself (the classic lock-at-end black is a PIN lock, not a quota gate) and the gate reason must
+     * not outlive the mode. The art, anchor and re-cover behaviour are identical to a night quota
+     * gate: five minutes, then `KidsScreenHelper.showScreenOff`.
+     */
+    public static void armNightArt(Activity activity) {
+        armState();
+        sScene = SCENE_NIGHT;
+        sNightStartMs = SystemClock.elapsedRealtime();
+        sQuotaGate = false;
+
+        if (activity != null) {
+            cover(activity);
+        }
+
+        Log.d(TAG, "Lock-at-end armed (night art, no quota gate)");
     }
 
     /**
