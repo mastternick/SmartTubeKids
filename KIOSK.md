@@ -563,7 +563,12 @@ Kids Mode or the PIN switched off), not on a quota check — the helper delibera
 unhandled key press must still go through the `sQuotaGate && isResetWindowDone` branch that writes the
 fresh quota, otherwise the child would land on a screen that re-locks on the next play attempt.
 
-> **Status:** implemented on branch `kids`, CI build pending, on-device smoke pending.
+> **Status:** committed on branch `kids` as `26f04b7b`; CI run
+> [44172595898](https://github.com/mastternick/SmartTubeKids/actions/runs/44172595898) green
+> (lint + build, artifact `SmartTubeKids_32.56-kids-86_*`). DEX probe of the universal APK:
+> `showScreenOff`, `showBlackScreenKeepBrightness`, `isBedtimeLockDue`, `isPinDialogOpen`,
+> `isBedtimeGateActive` present, `isBedtimeNight` absent (the renamed helper). **Not released;
+> on-device smoke pending.**
 
 ## Reset pause starts when the exhausted clip stops (KIDS v1.10 fix)
 
