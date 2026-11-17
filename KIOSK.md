@@ -460,10 +460,13 @@ setting. 06:00–18:00 keeps the v1.9.8 behaviour.
 (`setClickable(true)`, `setFocusable(false)`, brightness restored like the car does): pure black canvas,
 a deterministic star field with a slow twinkle, a moon with craters and glow, a ground line and a small
 animal curled up asleep with a breathing scale and floating "Z"s — all `Paint`/`Canvas`, no assets.
-After `SCENE_MS = 60_000` it fades over `FADE_MS = 2_000` into the plain black screen at minimum
-brightness, i.e. the "switched off" TV the request asked for. `show(activity, elapsedMs)` needs no
-separate expiry branch in `cover()`: once the elapsed time is already past the minute it goes straight to
-the black screen, so a resume (or a watchdog re-cover) after 60 s shows black instead of restarting the scene.
+After `SCENE_MS` it fades over `FADE_MS = 2_000` into the plain black screen at minimum brightness —
+the "switched off" TV the request asked for at the time. `show(activity, elapsedMs)` needs no
+separate expiry branch in `cover()`: once the elapsed time is already past the scene's duration it goes
+straight to the end state, so a resume (or a watchdog re-cover) after the scene is over shows the end
+state instead of restarting the scene. (v1.10.0 shipped `SCENE_MS = 60_000` with that
+minimum-brightness end state; v1.11.0 raised the duration to five minutes and the end state is now the
+switched-off screen — next section.)
 
 **Nothing else changes.** The gate underneath is v1.9.8 unchanged: every key is swallowed, ten
 BACK/HOME/RECENTS/ESCAPE presses with at most 2 s between neighbours earn the way out (`KidsTimeUpKeyGate`),
@@ -489,10 +492,10 @@ Load-bearing details:
   therefore fades a black `kids_night_scene_fade` view in above the artwork (and the backlight down
   with it). Same family as the v1.2.x overlay bugs: a black screen is only black if something opaque
   is on top.
-- **The 60 s anchor owns the countdown, not the tick.** `show()` is called by `cover()` on every key
+- **The uptime anchor owns the countdown, not the tick.** `show()` is called by `cover()` on every key
   press and resume; it posts the tick only in the attach branch. Re-posting there would let a child
-  mashing the remote push the expiry out indefinitely, so the scene would never reach the black
-  screen the request asked for.
+  mashing the remote push the expiry out indefinitely, so the scene would never reach the end
+  state the request asked for. The duration itself (`SCENE_MS`) is the only thing that moved.
 - **One arm helper.** `arm(...)` and `armNight(...)` both delegate to `armQuotaGate(activity, scene)`,
   which sets `armState()`, the scene and `sNightStartMs`, covers, sets `sQuotaGate = true` and schedules
   the rollover check. Letting them diverge would silently break the no-PIN release branch
