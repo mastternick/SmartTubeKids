@@ -580,7 +580,14 @@ fresh quota, otherwise the child would land on a screen that re-locks on the nex
 > (lint + build, artifacts `…kids-86_*` / `…kids-89_*`). DEX probe of the universal APKs:
 > `showScreenOff`, `showBlackScreenKeepBrightness`, `isBedtimeLockDue`, `isPinDialogOpen`,
 > `isBedtimeGateActive`, `armNightArt` present, `isBedtimeNight` absent (the renamed helper).
-> **Not released; on-device smoke pending.**
+> **Not released.**
+>
+> **Device:** the TV box (Box R 4K, Android 14, `armeabi-v7a`) was updated **in place** on
+> 2026-11-18 with `adb install -r SmartTubeKids_32.56-kids-89_armeabi-v7a.apk` — previous build
+> `32.56-kids-85`, no uninstall, so the Kids Mode PIN, the quota counters and the app data
+> survived. Verified on the box: `versionName=32.56-kids-89`, `ACCESS_RESTRICTED_SETTINGS=allow`,
+> `KioskKeyGuardService` enabled **and bound** (`dumpsys accessibility`), no FATAL/ANR in logcat,
+> `BrowseActivity` resumed. The on-device smoke of the night lock itself is still pending.
 
 ## Reset pause starts when the exhausted clip stops (KIDS v1.10 fix)
 
