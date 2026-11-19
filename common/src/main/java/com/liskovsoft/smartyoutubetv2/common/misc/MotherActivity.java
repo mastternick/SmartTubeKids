@@ -292,7 +292,9 @@ public class MotherActivity extends FragmentActivity {
 
         // KIDS: force stop — keep the time-up screen covered across activity switches
         // (the playback activity finished; this one must not show the playlist).
-        // In-memory flag only: nothing is locked after a process restart.
+        // KIDS v1.13: no longer in-memory only — applyOnResume re-derives the gate from the
+        // persisted quota, so a restart or reboot while the quota is spent re-arms it before
+        // the playlist is ever visible.
         KidsTimeUpLock.applyOnResume(this);
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();

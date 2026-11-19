@@ -55,6 +55,9 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
  * - SAFETY VALVE: if the app cannot get on screen after ~45 s (a broken install
  *   must not brick the TV), the cover is removed and the service stops; the pin
  *   and the next key press inside the app still re-arm everything.
+ *   KIDS v1.13: the valve never fires while a time-up gate is up (the child must not
+ *   reach the launcher just because relaunching is slow) and a PIP window does not
+ *   count as "not fullscreen" then, either.
  *
  * Everything is wrapped in try/catch(Throwable): this runs in a service started
  * from lifecycle callbacks, and a crash here would take down the whole app
@@ -120,7 +123,7 @@ public class KioskWatchdogService extends Service {
         // fresh process the in-memory grace window is gone — the loop would relaunch
         // the app the parent just left. tick() checks this too; stopping here avoids
         // the notification and the first tick altogether.
-        if (!KioskModeManager.isKioskEnabled(this) || KioskModeManager.isReleasedByParent(this)) {
+        if (!isKioskOrGateActive() || KioskModeManager.isReleasedByParent(this)) {
             stopSafely();
             return START_NOT_STICKY;
         }
@@ -141,8 +144,8 @@ public class KioskWatchdogService extends Service {
 
     private void tick() {
         try {
-            if (!KioskModeManager.isKioskEnabled(this)) {
-                stopSafely(); // parent switched kiosk off
+            if (!isKioskOrGateActive()) {
+                stopSafely(); // parent switched kiosk off and no time-up gate is up
                 return;
             }
 
@@ -163,8 +166,12 @@ public class KioskWatchdogService extends Service {
                 return;
             }
 
-            if (KioskModeManager.isInPipPlayback(this) || !KioskModeManager.isScreenInteractive(this)) {
-                hideOverlay(); // PIP / screen off are legit "not fullscreen" states
+            // PIP / screen off are legit "not fullscreen" states — except while a time-up
+            // gate is up (KIDS v1.13): a PIP window is then just another way to keep watching
+            // and must not keep the watchdog quiet.
+            if ((KioskModeManager.isInPipPlayback(this) && !KidsTimeUpLock.isLocked())
+                    || !KioskModeManager.isScreenInteractive(this)) {
+                hideOverlay();
                 scheduleNext(POLL_MS);
                 return;
             }
@@ -172,9 +179,18 @@ public class KioskWatchdogService extends Service {
             mStrikes++;
 
             if (mStrikes >= GIVE_UP_STRIKES) {
-                Log.e(TAG, "Kiosk watchdog: the app won't come back, releasing the screen (safety valve)");
-                stopSafely();
-                return;
+                if (!KidsTimeUpLock.isLocked()) {
+                    Log.e(TAG, "Kiosk watchdog: the app won't come back, releasing the screen (safety valve)");
+                    stopSafely();
+                    return;
+                }
+
+                // KIDS v1.13: a locked time-up screen is NEVER abandoned — the child must not
+                // get the launcher just because relaunching is slow. Keep covering and
+                // relaunching; log once per GIVE_UP_STRIKES so a stuck device stays diagnosable.
+                if (mStrikes % GIVE_UP_STRIKES == 0) {
+                    Log.e(TAG, "Kiosk watchdog: time-up gate is up, relaunch keeps failing (strike %s) — staying armed", mStrikes);
+                }
             }
 
             if (mStrikes >= OVERLAY_AFTER_STRIKES) {
@@ -187,6 +203,14 @@ public class KioskWatchdogService extends Service {
             Log.e(TAG, e);
             scheduleNext(POLL_MS); // never die silently — the lock must stay armed
         }
+    }
+
+    /**
+     * KIDS v1.13: keep guarding when kiosk is OFF but a time-up gate is up — the child must
+     * not be able to sit on the launcher (or in a PIP window) until the reset elapses.
+     */
+    private boolean isKioskOrGateActive() {
+        return KioskModeManager.isKioskEnabled(this) || KidsTimeUpLock.isLocked();
     }
 
     private void relaunchApp() {

@@ -77,6 +77,13 @@ public class KidsTimeUpLock {
     // a BadTokenException and returns without ever dismissing: neither a flag nor a timer can tell
     // "still on screen" from "never showed", `isShowing()` can.
     private static WeakReference<AlertDialog> sPinDialog;
+    // KIDS v1.13: the PIN prompt used to accept unlimited guesses — a child could simply
+    // brute force a four-digit PIN. Five wrong tries close the prompt and pause the prompt
+    // for PIN_LOCKOUT_MS; the gate itself stays armed, so the screen never opens early.
+    private static final int MAX_PIN_ATTEMPTS = 5;
+    private static final long PIN_LOCKOUT_MS = 5 * 60_000L;
+    private static int sWrongPinAttempts;
+    private static long sPinLockoutUntilMs;
     // KIDS v1.9.4: the quota gate opens itself at the end of the reset window (no PIN).
     // One-shot task + the context it was scheduled with. sQuotaGate distinguishes the
     // quota gate (rollover applies) from Lock-at-end (it does not).
@@ -350,7 +357,97 @@ public class KidsTimeUpLock {
     public static void armState() {
         sLocked = true;
         sBedtimeLock = false; // a fresh arm of any scene starts without it
+        sWrongPinAttempts = 0; // KIDS v1.13: a fresh gate costs fresh guesses
+        sPinLockoutUntilMs = 0;
         KidsTimeUpKeyGate.resetSequence(); // a fresh time-out costs a fresh 10 presses
+    }
+
+    /**
+     * KIDS v1.13: re-arm the gate from the PERSISTED quota after a process death, a reboot or a
+     * crash — the in-memory {@code sLocked} is otherwise the only memory of it, so a restart
+     * used to hand the child the playlist back with the daily quota already spent.
+     *
+     * Only a gate that would be due anyway is re-created: the hard stop (force stop ON) or the
+     * bedtime window (which holds even with force stop OFF — KIDS v1.11). The calm exit never
+     * invents a gate. Everything else bails out and leaves the app unlocked, so the "never
+     * trap" invariant holds: Kids Mode or the PIN off (no base), no watch limit, a quota with
+     * time left, a pause that already elapsed (the controller owns that rollover), or a parent
+     * gate session still running (a restart must not re-lock the parent who just typed the PIN).
+     *
+     * The art is chosen exactly like the controller's force-stop session: bedtime →
+     * night scene, otherwise the mile marker if the parent picked it. {@link #armQuotaGate}
+     * schedules the rollover one-shot, whose boundary is the persisted {@code windowStartMs},
+     * so the restored gate still opens by itself at the end of the pause.
+     */
+    public static void restoreIfDue(Activity activity) {
+        if (sLocked || activity == null) {
+            return;
+        }
+
+        Context context = activity.getApplicationContext();
+
+        if (!isKidsGateBase(context)) {
+            return; // Kids Mode or PIN off: no gate may exist at all
+        }
+
+        if (isGateUnlocked()) {
+            return; // the parent just unlocked a gate: a restart must not re-lock them
+        }
+
+        KidsModeData data = KidsModeData.instance(context);
+
+        if (data.getTimerMinutes() <= 0) {
+            return; // no watch limit: nothing to re-arm
+        }
+
+        if (!isQuotaExhausted(context)) {
+            return; // time left in the window
+        }
+
+        if (isResetWindowDone(context)) {
+            return; // the pause is over — the controller rolls the window over
+        }
+
+        // Exactly the controller's gate-due predicate (isForceStopActive || isBedtimeLockDue):
+        // the night window holds even with "stop immediately" OFF (KIDS v1.11), so a restart at
+        // 20:00 must restore the night scene instead of handing over the playlist.
+        boolean bedtime = KidsBedtime.isNight(data.getBedtimeMinutes(),
+                KidsBedtime.minutesOfDay(System.currentTimeMillis()));
+
+        if (!isForceStopActive(context) && !bedtime) {
+            return; // the calm exit must never invent a gate
+        }
+
+        // KIDS v1.13: scheduling the auto-open needs a real pause boundary.
+        // scheduleRolloverCheck() bails out unless used >= limit AND inCooldown, and a cold
+        // browse-only launch has no controller tick to write that flag yet (the controllers are
+        // built from PlaybackPresenter.onViewInitialized, not from instance()). A restart blob
+        // normally carries the crossing (v1.12); a legacy blob carries none, and the only honest
+        // boundary there is "now" — same as the controller's own fallback, and it still gives the
+        // gate its automatic opening one interval later. Without this the restored gate would
+        // have NO automatic opening at all.
+        if (!data.isInCooldown()) {
+            long now = System.currentTimeMillis();
+            long crossing = data.getExhaustedAtMs();
+            long boundary = crossing > 0 ? Math.max(crossing, data.getWindowStartMs()) : now;
+
+            if (KidsQuotaWindow.isPauseElapsed(boundary, now, data.getResetIntervalMinutes())) {
+                data.resetWindow(now); // the pause already ran out: fresh quota, no gate
+                Log.d(TAG, "Time-up gate not restored: the pause already elapsed (boundary=%s)", boundary);
+                return;
+            }
+
+            data.anchorCooldown(boundary);
+            Log.d(TAG, "Time-up gate: pause boundary normalised (boundary=%s, crossing=%s)", boundary, crossing);
+        }
+
+        if (bedtime) {
+            armQuotaGate(activity, SCENE_NIGHT);
+        } else {
+            armQuotaGate(activity, data.isUseMileMarker() ? SCENE_MILE_MARKER : SCENE_PLAIN);
+        }
+
+        Log.d(TAG, "Time-up gate restored from the persisted quota (scene=%s)", sScene);
     }
 
     /**
@@ -358,6 +455,11 @@ public class KidsTimeUpLock {
      * activity went away, so the child never lands on a visible playlist.
      */
     public static void applyOnResume(Activity activity) {
+        // KIDS v1.13: a fresh process starts unlocked — re-derive the gate from the persisted
+        // quota before the in-memory guard below (a restart, a reboot or a process death must
+        // not hand the child the playlist back while the quota is spent).
+        restoreIfDue(activity);
+
         if (!sLocked || activity == null) {
             return;
         }
@@ -436,7 +538,11 @@ public class KidsTimeUpLock {
 
         // KIDS v1.9.6: only the QUOTA time-up screen honours the opt-out — a Lock-at-end
         // lock keeps requiring the PIN (the switch text promises the time limit only).
-        if (sQuotaGate && !data.isPinRequiredAfterMash()) {
+        // KIDS v1.13: and only the CLASSIC black screen does. The switch means "the ten
+        // presses leave the plain time-up screen"; the car (mile marker) and the night
+        // scene are the hard lock — they are never released without the PIN, so a parent
+        // who has the opt-out on still cannot hand a child a key-combo exit from them.
+        if (sQuotaGate && sScene == SCENE_PLAIN && !data.isPinRequiredAfterMash()) {
             // KIDS v1.9.8: the switch now wins over kiosk mode too. Kiosk keeps HOME/RECENTS
             // blocked anyway and no parent session is granted here, so the child gains nothing.
             // Deliberately NO KidsPinGate.unlock() here: that opens a 10-minute parent
@@ -460,6 +566,24 @@ public class KidsTimeUpLock {
         // night scene would darken the panel under it.
         if (isPinDialogOpen()) {
             return; // stays armed, the prompt already owns the screen
+        }
+
+        // KIDS v1.13: too many wrong guesses — no prompt at all for the lockout. The screen stays
+        // covered and the sequence is reset here: presses made while locked out must not leave
+        // the mash armed, or one press right after the pause would reopen the prompt for free.
+        long now = System.currentTimeMillis();
+
+        if (sPinLockoutUntilMs != 0 && now >= sPinLockoutUntilMs) {
+            // The pause is over: the parent gets a fresh five guesses. Cancelling the dialog
+            // does NOT refill them, otherwise a cancel/re-mash loop would defeat the limit.
+            sPinLockoutUntilMs = 0;
+            sWrongPinAttempts = 0;
+        }
+
+        if (now < sPinLockoutUntilMs) {
+            KidsTimeUpKeyGate.resetSequence();
+            cover(activity);
+            return;
         }
 
         if (System.currentTimeMillis() - sPinDialogShownAtMs < PIN_DIALOG_THROTTLE_MS) {
@@ -486,10 +610,25 @@ public class KidsTimeUpLock {
                     if (Utils.passwordMatch(data.getPin(), newValue)) {
                         // One unlock for the whole parent session, exactly like KidsPinGate:
                         // opening Settings right after must not ask again.
+                        sWrongPinAttempts = 0;
+                        sPinLockoutUntilMs = 0;
                         KidsPinGate.unlock();
                         unlockGateSession(activity);
                         release(activity);
                         return true;
+                    }
+
+                    // KIDS v1.13: every miss counts. At the limit the prompt closes itself —
+                    // the dialog may already be gone (cancel/timeout), so the reference is
+                    // read null-safe and a missing dialog just leaves the lockout armed.
+                    if (++sWrongPinAttempts >= MAX_PIN_ATTEMPTS) {
+                        sPinLockoutUntilMs = System.currentTimeMillis() + PIN_LOCKOUT_MS;
+                        KidsTimeUpKeyGate.resetSequence();
+                        AlertDialog dialog = sPinDialog != null ? sPinDialog.get() : null;
+                        if (dialog != null) {
+                            dialog.dismiss();
+                        }
+                        Log.d(TAG, "PIN attempts exhausted: prompt locked for %s min", PIN_LOCKOUT_MS / 60_000L);
                     }
 
                     MessageHelpers.showMessage(activity, R.string.kids_wrong_pin);
@@ -584,6 +723,8 @@ public class KidsTimeUpLock {
     public static void release(Activity activity) {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        sWrongPinAttempts = 0;
+        sPinLockoutUntilMs = 0;
         sScene = SCENE_PLAIN;
         sNightStartMs = 0;
         sQuotaGate = false;
@@ -612,6 +753,8 @@ public class KidsTimeUpLock {
     public static void releaseStateOnly() {
         sLocked = false;
         sPinDialogShownAtMs = 0;
+        sWrongPinAttempts = 0;
+        sPinLockoutUntilMs = 0;
         sScene = SCENE_PLAIN;
         sNightStartMs = 0;
         sQuotaGate = false;

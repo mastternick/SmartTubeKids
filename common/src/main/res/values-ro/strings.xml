@@ -808,7 +808,7 @@
   <string name="kids_mile_marker_title">Mod Marcare Ritmică</string>
   <string name="kids_mile_marker_desc">Când timpul expirează, o mașinuță pornește pe șoseaua de noapte. Pe măsură ce fereastra de resetare trece, felinarele se aprind rând pe rând. Când mașinuța ajunge la felinarul 10, resetarea este completă.</string>
   <string name="kids_mash_pin_title">Cere PIN-ul după 10 apăsări</string>
-  <string name="kids_mash_pin_desc">Când limita de timp s-a terminat, 10 apăsări rapide pe BACK deschid dialogul PIN. Dezactivează pentru ca acele 10 apăsări să iasă direct din ecranul de timp expirat.</string>
+  <string name="kids_mash_pin_desc">Când limita de timp s-a terminat, 10 apăsări rapide pe BACK deschid dialogul PIN. Dezactivează pentru ca acele 10 apăsări să închidă doar ecranul simplu de timp expirat — mașina și scena de noapte cer mereu PIN-ul.</string>
   <string name="kids_countdown_warning">Cronometru pentru timpul rămas</string>
   <string name="kids_countdown_off">Oprit</string>
   <string name="kids_bedtime">Scenă de noapte după</string>

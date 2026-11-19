@@ -195,10 +195,18 @@ public class KioskModeManager {
      * NOT a bypass: it is armed by any PIN entry, so honouring it would re-open HOME
      * for the child for ten minutes after the parent adjusted any Kids setting.
      * The parent inside the app uses BACK+PIN (or the switch) to get out.
+     *
+     * KIDS v1.13: a time-up gate blocks the escape keys device-wide even with kiosk
+     * OFF — once the app is backgrounded the in-app swallow ({@link
+     * MotherActivity#dispatchKeyEvent}) can never see the key again, so the child
+     * would walk out of the car/night scene through the launcher. The gate's own
+     * "never trap" rules still apply: Kids Mode or the PIN off, a finished reset or
+     * a correct PIN drops the lock, and only then does this return to the kiosk term.
      */
     public static boolean isKeyGuardActive(Context context) {
         try {
-            return isKioskEnabled(context) && !isInExitGrace() && !isReleasedByParent(context);
+            return KidsTimeUpLock.isLocked()
+                    || (isKioskEnabled(context) && !isInExitGrace() && !isReleasedByParent(context));
         } catch (Throwable e) {
             Log.e(TAG, e);
             return false;
@@ -393,9 +401,12 @@ public class KioskModeManager {
             // covers the PIN exit and — unlike isInExitGrace — survives the process
             // death that follows it, so a system rebind of the key guard
             // (onServiceConnected) can no longer drag the parent straight back.
-            if (!isKioskEnabled(context) || isInExitGrace() || isReleasedByParent(context)
+            // KIDS v1.13: a time-up gate pulls the child back with kiosk OFF too, and
+            // its PIP window is not a legitimate place to hide (see KioskWatchdogService).
+            if ((!isKioskEnabled(context) && !KidsTimeUpLock.isLocked()) || isInExitGrace() || isReleasedByParent(context)
                     || Helpers.isAppInForeground()
-                    || isInPipPlayback(context) || !isScreenInteractive(context)) {
+                    || (isInPipPlayback(context) && !KidsTimeUpLock.isLocked())
+                    || !isScreenInteractive(context)) {
                 return;
             }
 
@@ -569,10 +580,15 @@ public class KioskModeManager {
                 sKeyGuardSetupLeftApp = true;
             }
 
+            // KIDS v1.13: a locked time-up gate is treated like kiosk — the child must be
+            // pulled back into the ask-for-PIN screen even with kiosk OFF. The Device Owner
+            // exemption therefore requires an ACTIVE kiosk: with kiosk off there is no lock task
+            // confinement, so exempting the DO box would leave a gate with no recovery at all.
             if (Build.VERSION.SDK_INT < 21 || isInExitGrace()
                     || isReleasedByParent(activity)
-                    || !isKioskEnabled(activity)
-                    || isDeviceOwner(activity) || isTransientTask(activity)) {
+                    || (!isKioskEnabled(activity) && !KidsTimeUpLock.isLocked())
+                    || (isDeviceOwner(activity) && isKioskEnabled(activity))
+                    || isTransientTask(activity)) {
                 return;
             }
 
@@ -589,9 +605,9 @@ public class KioskModeManager {
                 try {
                     if (isInExitGrace() // KIDS v1.2.8: parent is leaving on purpose
                             || isReleasedByParent(context) // KIDS v1.7: durable PIN-exit release
-                            || !isKioskEnabled(context) // parent turned it off meanwhile
+                            || (!isKioskEnabled(context) && !KidsTimeUpLock.isLocked()) // kiosk off / gate dropped meanwhile
                             || Utils.isAppInForegroundFixed() // normal in-app navigation
-                            || isInPipPlayback(context) // PIP window is fine to keep
+                            || (isInPipPlayback(context) && !KidsTimeUpLock.isLocked()) // PIP is fine, unless a gate is up
                             || !isScreenInteractive(context)) { // screen off / standby
                         return;
                     }

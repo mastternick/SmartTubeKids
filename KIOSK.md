@@ -765,6 +765,89 @@ Verify binding and function separately: `adb shell dumpsys accessibility | grep 
 (bound, with `CAN_REQUEST_FILTER_KEY_EVENTS`) and then press HOME **on the physical remote** —
 `adb shell input keyevent` bypasses the accessibility input filter and proves nothing.
 
+## Hard lock while a time-up gate is up (KIDS v1.13)
+
+The car (Mile Marker) and the cat (night scene) are now a **hard lock**: while either is on
+screen the device has no route out for the child except the parent's PIN, the reset window
+elapsing, or the parent turning Kids Mode / the PIN off. Five changes make that true, each one
+closing a way the gate could be lost:
+
+1. **The art gates always ask for the PIN** (`KidsTimeUpLock.onKeyPress`). The "Ask for the PIN
+   after 10 presses" switch now only applies to the classic black time-up screen
+   (`sQuotaGate && sScene == SCENE_PLAIN && !isPinRequiredAfterMash()`). With the switch off a
+   mashed BACK on the car or the night scene no longer releases anything — those two are the
+   hard lock and only the PIN opens them. The settings description says so.
+2. **The gate survives a restart** (`KidsTimeUpLock.restoreIfDue`, called from
+   `applyOnResume` *before* the in-memory `sLocked` guard). The lock used to live only in
+   memory, so a process death, a crash or a reboot handed the child the playlist with the
+   quota already spent. A fresh process now re-derives the gate from the persisted quota and
+   re-arms the same art the controller would choose (bedtime → night scene, otherwise the mile
+   marker if selected). The rollover one-shot is re-scheduled from the persisted
+   `windowStartMs`, so a restored gate still opens by itself at the end of the pause; a blob
+   whose pause flag was never written (a cold launch has no controller tick yet, a legacy blob
+   has no crossing at all) is normalised first — boundary = the recorded crossing, else "now" —
+   so the auto-open always has one. If that boundary has already elapsed, the quota is rolled
+   over and no gate is armed.
+3. **Escape keys and the bring-back are gate-aware** (`KioskModeManager`).
+   `isKeyGuardActive` is `KidsTimeUpLock.isLocked() || (kiosk on && no grace && no parent
+   release)`, so where the accessibility guard is enabled the input filter kills HOME /
+   RECENTS / mic device-wide **even with kiosk OFF** — the in-app swallow is useless once the
+   app is backgrounded. `consumeEscapeKey` shares that predicate. `bringAppBack` and
+   `scheduleReentry` treat a locked gate like kiosk, so the child is pulled back onto the
+   ask-for-PIN screen; `scheduleReentry` also starts the v1.4 watchdog, which keeps relaunching
+   even on a device where the guard was never enabled (a key leak then costs the child ~1 s on
+   the launcher, never the gate). `KioskKeyGuardService` still feeds the swallowed keys into
+   `KidsTimeUpLock.onGuardEscapeKey`, which is what makes the mash/PIN flow reachable with the
+   app off screen. The Device Owner exemption in `scheduleReentry` now requires an active kiosk:
+   with kiosk off there is no lock task confinement, so a DO box would otherwise leave a gate
+   with no recovery.
+4. **PIN guesses are bounded** (`KidsTimeUpLock`). Five wrong PINs dismiss the prompt, clear
+   the mash sequence and pause the prompt for five minutes (`MAX_PIN_ATTEMPTS = 5`,
+   `PIN_LOCKOUT_MS = 5 min`). The gate stays armed throughout — a brute-forcing child only
+   loses the prompt, never the lock. The counters reset on a correct PIN, on a new arm and on
+   every release.
+5. **The watchdog never abandons a locked screen** (`KioskWatchdogService`). The ~45 s
+   give-up valve does not fire while `KidsTimeUpLock.isLocked()` (it keeps covering and
+   relaunching, logging once per valve period), and a PIP window no longer counts as a
+   legitimate "not fullscreen" state while a gate is up.
+
+### The never-trap invariant
+
+The hard lock can only ever be released by something the parent controls or by the clock:
+
+- **Kids Mode off or the PIN off** ⇒ `isKidsGateBase` is false ⇒ the next key press (or the
+  key guard's own `onGuardEscapeKey` route) releases the gate at once. A parent who disables
+  either in Settings is never locked out by a leftover overlay.
+- **The reset boundary always opens the gate** — no mash, no PIN, kiosk or not
+  (`openResetGate`, and the first key press after the boundary).
+- **The correct PIN always releases** — and grants the usual 10-minute gate session. That
+  authorization is in-memory only, so a process death drops it and the restored gate arms
+  again (the parent simply types the PIN once more); what survives a restart is the persisted
+  quota, not the unlock.
+- **A gate is never invented**: `restoreIfDue` returns unless the quota is actually exhausted
+  and a gate is due anyway (hard stop on, or the bedtime window). The calm exit stays calm.
+
+### PIN lockout
+
+Five wrong PIN entries in one gate → the prompt closes and cannot be opened again for five
+minutes; the screen stays covered, the mash must be earned from scratch afterwards. The counter
+is per gate and in memory: a correct PIN, a reset of the window, a new arm or any release
+clears it.
+
+### Out of the app's reach
+
+Even with all of the above, these stay outside the lock — they are the platform's, not the
+app's:
+
+- **POWER / reboot** — the TV can always be switched off, and a reboot drops every in-memory
+  state (the persisted-quota restore brings the gate back on the next resume).
+- **TV / HDMI-CEC input switching** — the remote's input key and a CEC device can select
+  another source; no app-level filter can stop the set from changing input.
+- **The volume OSD** — volume keys are handled by the system and show its own overlay.
+- **The assistant overlay** — on devices where the assist key is decided before any input
+  filter, the assistant can still cover the screen (disable the assistant app for a real lock).
+- **The system power menu** — long-press POWER belongs to the system.
+
 ## Exiting kiosk
 
 - Leave the app (parent): press BACK on the main screen and enter the PIN. With
