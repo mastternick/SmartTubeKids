@@ -856,15 +856,18 @@ app's:
   filter, the assistant can still cover the screen (disable the assistant app for a real lock).
 - **The system power menu** — long-press POWER belongs to the system.
 
-> **Status (2026-11-19):** committed on `kids` as `48425e763`; CI run
-> [44512686648](https://github.com/mastternick/SmartTubeKids/actions/runs/44512686648) green
-> (artifact `SmartTubeKids_32.79-kids-95_*`; DEX carries `restoreIfDue`, `isKioskOrGateActive`,
-> `sPinLockoutUntilMs`). Installed **in place** on the TV box (previous
-> `32.56-kids-89`): `versionName=32.79-kids-95`, `ACCESS_RESTRICTED_SETTINGS=allow`,
-> `KioskKeyGuardService` enabled **and bound**, no FATAL in logcat, and a gate was
-> **not observed on that launch: the screen showed the browse grid with 27:37 left on the
-> badge, i.e. the quota was not exhausted**. The lock itself was **not** exercised on the
-> device — that needs a spent quota plus the parent PIN.
+> **Status (2026-11-19):** committed on `kids` as `48425e763` (v1.13) and `3b3c79fc3` (v1.14, the
+> last-watched boundary + restore-once); CI runs
+> [44512686648](https://github.com/mastternick/SmartTubeKids/actions/runs/44512686648) and
+> [44517813264](https://github.com/mastternick/SmartTubeKids/actions/runs/44517813264) green
+> (artifacts `…kids-95_*` / `…kids-99_*`; the DEX carries `restoreIfDue`, `isKioskOrGateActive`,
+> `sPinLockoutUntilMs`, `getLastWatchMs`, `sRestoreChecked`, and no `mExhaustedAtMs`). The box was
+> updated **in place** twice (`32.56-kids-89` → `32.79-kids-95` → `32.79-kids-99`):
+> `ACCESS_RESTRICTED_SETTINGS=allow`, `KioskKeyGuardService` enabled **and bound**, no FATAL in
+> logcat. On the kids-95 launch a gate was **not observed**: the captured screen showed the browse
+> grid with 27:37 left on the badge, i.e. the quota was not exhausted, so `restoreIfDue` returned at
+> `isQuotaExhausted`. The lock itself was **not** exercised on the device — that needs a spent quota
+> plus the parent PIN.
 
 ## Upstream sync (official SmartTube → kids)
 
@@ -888,8 +891,9 @@ contains it, trial-merges, and
   push workflow, `workflow_dispatch` can) and watched; a red build opens an issue and fails the run —
   nothing is reverted automatically.
 
-The workflow file also lives on `master` (the repo's default branch) because scheduled workflows only
-run from there; the job itself always operates on `kids`.
+**Default branch is `kids`** (switched 2026-11-19): scheduled workflows only run from the default
+branch, so keeping it on the stale `master` snapshot meant a copy of this file had to be mirrored there.
+`master` still carries one mirror commit for the period before the switch; it is inert now.
 
 
 ## Exiting kiosk
