@@ -848,6 +848,41 @@ app's:
   filter, the assistant can still cover the screen (disable the assistant app for a real lock).
 - **The system power menu** — long-press POWER belongs to the system.
 
+> **Status (2026-11-19):** committed on `kids` as `48425e763`; CI run
+> [44512686648](https://github.com/mastternick/SmartTubeKids/actions/runs/44512686648) green
+> (artifact `SmartTubeKids_32.79-kids-95_*`; DEX carries `restoreIfDue`, `isKioskOrGateActive`,
+> `sPinLockoutUntilMs`, `getExhaustedAtMs`). Installed **in place** on the TV box (previous
+> `32.79-kids-89`): `versionName=32.79-kids-95`, `ACCESS_RESTRICTED_SETTINGS=allow`,
+> `KioskKeyGuardService` enabled **and bound**, no FATAL in logcat, and no gate armed on that
+> launch (the v1.12 pause had already elapsed). The lock itself was **not** exercised on the
+> device — that needs a spent quota plus the parent PIN.
+
+## Upstream sync (official SmartTube → kids)
+
+`kids` was synced to the official release tag **32.79** (`ecaab71…`): 191 upstream commits merged,
+19 conflicts resolved by policy — upstream's submodule pins, upstream wholesale for the files with
+no KIDS code, ours-plus-upstream for `MotherActivity` and `MainApplication`, upstream verbatim plus
+the KIDS deltas in `smarttubetv/build.gradle` (applicationId, flavours, APK naming, no
+crash-reporting libs), upstream base plus the 47 KIDS keys in `values-ro`. One semantic conflict was
+fixed by hand: `VideoLoaderController` got upstream's live-SABR dispatch back (our pre-base
+`!formatInfo.isLive()` guard made the SABR-live preference selectable but unusable).
+
+**It repeats by itself.** `.github/workflows/upstream-sync.yml` runs daily at 04:17 UTC (and on
+demand): it takes the newest **release tag** (not the moving master tip), skips when `kids` already
+contains it, trial-merges, and
+
+- **conflicts** → merge aborted, the conflicting paths posted in an `upstream-sync` issue (deduped by
+  title) and the run fails — the workflow never resolves anything by itself;
+- **clean merge** → post-merge invariants (applicationId, KIDS strings, the KIDS/Kiosk sources,
+  `KIOSK.md`), commit, fast-forward push to `kids` guarded against a branch that moved meanwhile, then
+  `CI.yml` is **dispatched explicitly** for that exact commit (a `GITHUB_TOKEN` push cannot trigger a
+  push workflow, `workflow_dispatch` can) and watched; a red build opens an issue and fails the run —
+  nothing is reverted automatically.
+
+The workflow file also lives on `master` (the repo's default branch) because scheduled workflows only
+run from there; the job itself always operates on `kids`.
+
+
 ## Exiting kiosk
 
 - Leave the app (parent): press BACK on the main screen and enter the PIN. With
