@@ -1,0 +1,188 @@
+name: Upstream Sync
+
+# KIDS: pulls the official SmartTube releases into `kids`.
+#
+# Policy (user-mandated, 2026-11-19):
+#  - target = the newest upstream RELEASE TAG (a state upstream itself declares buildable),
+#    never the moving master tip; a manual run may name any tag/branch.
+#  - a clean merge is pushed to `kids` and CI is dispatched for that exact commit; on a red
+#    build the workflow fails loudly and opens/comments an issue — it never reverts.
+#  - conflicts are NEVER auto-resolved: the merge is aborted, the conflicting paths are posted
+#    in an issue and the run goes red. Resolution is a human job (see KIOSK.md).
+#  - no PAT: pushes use GITHUB_TOKEN, which cannot trigger push workflows, so CI is dispatched
+#    explicitly via workflow_dispatch (the only event a GITHUB_TOKEN is allowed to fire).
+#  - the submodule gitlinks are taken from upstream untouched; CI checks them out itself.
+
+on:
+  schedule:
+    - cron: '17 4 * * *' # daily, after upstream's usual late-evening pushes
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream ref to sync (release tag or master). Empty = newest numeric release tag.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BASE_BRANCH: kids
+      UPSTREAM_URL: https://github.com/yuliskov/SmartTube.git
+    steps:
+      - name: Checkout kids
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: kids
+          fetch-depth: 0
+          submodules: false
+
+      - name: Resolve the upstream ref
+        id: target
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream '+refs/heads/master:refs/remotes/upstream/master'
+          git fetch --no-tags upstream '+refs/tags/*:refs/tags/*'
+          REF="${{ inputs.upstream_ref }}"
+          if [ -z "$REF" ]; then
+            REF=$(git tag --list | grep -E '^[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          fi
+          if [ -z "$REF" ]; then echo 'No release tag found upstream'; exit 1; fi
+          SHA=$(git rev-parse "$REF^{commit}")
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Syncing upstream $REF ($SHA)"
+
+      - name: Skip when already synced
+        id: check
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor "${{ steps.target.outputs.sha }}" HEAD; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "Already contains ${{ steps.target.outputs.ref }}; nothing to do."
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preflight invariants
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          grep -q 'applicationId "app.smarttubekids"' smarttubetv/build.gradle
+          test -f KIOSK.md
+          ls common/src/main/java/com/liskovsoft/smartyoutubetv2/common/misc/Kids*.java > /dev/null
+          ls common/src/main/java/com/liskovsoft/smartyoutubetv2/common/misc/Kiosk*.java > /dev/null
+
+      - name: Trial merge
+        id: merge
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          set -euo pipefail
+          git config user.name  'upstream-sync'
+          git config user.email 'upstream-sync@users.noreply.github.com'
+          if git merge --no-ff --no-commit '${{ steps.target.outputs.sha }}'; then
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt" || true
+            git merge --abort || true
+            echo "conflicts=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report conflicts and fail
+        if: steps.merge.outputs.conflicts == 'true'
+        run: |
+          set -euo pipefail
+          TITLE="Upstream sync blocked: conflicts in ${{ steps.target.outputs.ref }}"
+          BODY=$(printf 'Merging upstream `%s` (`%s`) into `%s` produced conflicts in:\n\n```\n%s\n```\n\nThe workflow never auto-resolves conflicts. Resolve on a sync branch by hand (policy: KIOSK.md / the merge notes), keep the KIDS deltas, then merge to `%s`.\n' \
+            "${{ steps.target.outputs.ref }}" "${{ steps.target.outputs.sha }}" "$BASE_BRANCH" \
+            "$(cat "$RUNNER_TEMP/conflicts.txt")" "$BASE_BRANCH")
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $TITLE" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi
+          echo "::error::Upstream ${{ steps.target.outputs.ref }} conflicts with $BASE_BRANCH; see the issue."
+          exit 1
+
+      - name: Post-merge invariants
+        if: steps.merge.outputs.conflicts == 'false'
+        run: |
+          set -euo pipefail
+          grep -q 'applicationId "app.smarttubekids"' smarttubetv/build.gradle
+          test "$(grep -c 'applicationId "app.smarttubekids"' smarttubetv/build.gradle)" -eq 1
+          grep -q 'header_kids_home' common/src/main/res/values/strings.xml
+          test "$(grep -c 'name="kids_' common/src/main/res/values-ro/strings.xml)" -ge 40
+          test -f KIOSK.md
+          test -f common/src/main/java/com/liskovsoft/smartyoutubetv2/common/misc/KidsNightScene.java
+          test -f common/src/main/java/com/liskovsoft/smartyoutubetv2/common/misc/KioskKeyGuardService.java
+          git add -A
+          git commit -m "Upstream ${{ steps.target.outputs.ref }}: merge official SmartTube into kids" \
+                     -m "Automatic sync by .github/workflows/upstream-sync.yml. Conflicts: none. KIDS deltas preserved (build.gradle ids/flavors/APK naming, locales union, MotherActivity key guard, MainApplication migration hook). CI is dispatched for this exact commit; a red build is reported in an issue and is not reverted automatically."
+
+      - name: Push and dispatch CI
+        id: push
+        if: steps.merge.outputs.conflicts == 'false'
+        run: |
+          set -euo pipefail
+          MERGE_SHA=$(git rev-parse HEAD)
+          PARENT_SHA=$(git rev-parse HEAD^1)
+          REMOTE_SHA=$(git ls-remote origin "refs/heads/$BASE_BRANCH" | cut -f1)
+          if [ "$REMOTE_SHA" != "$PARENT_SHA" ]; then
+            echo "::error::$BASE_BRANCH moved (remote $REMOTE_SHA, expected parent $PARENT_SHA); refusing to push."
+            exit 1
+          fi
+          git push origin "HEAD:$BASE_BRANCH"
+          echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+
+          gh workflow run CI.yml --repo "$GITHUB_REPOSITORY" --ref "$BASE_BRANCH"
+          RUN_ID=''
+          for _ in $(seq 1 30); do
+            sleep 10
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow CI.yml --branch "$BASE_BRANCH" \
+              --limit 20 --json databaseId,headSha \
+              --jq ".[] | select(.headSha == \"$MERGE_SHA\") | .databaseId" | head -1)
+            if [ -n "$RUN_ID" ]; then break; fi
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::CI run for $MERGE_SHA was not created."
+            exit 1
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Dispatched CI run $RUN_ID for $MERGE_SHA"
+
+      - name: Wait for CI and report a red build
+        if: steps.merge.outputs.conflicts == 'false'
+        env:
+          MERGE_SHA: ${{ steps.push.outputs.merge_sha }}
+          RUN_ID: ${{ steps.push.outputs.run_id }}
+        run: |
+          set -uo pipefail
+          if gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 20; then
+            echo "CI green for $MERGE_SHA"
+            exit 0
+          fi
+          URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          TITLE="Upstream sync ${{ steps.target.outputs.ref }}: CI failed on $BASE_BRANCH"
+          BODY=$(printf 'The automatic merge of upstream `%s` was pushed to `%s` as `%s`, but CI failed.\n\nRun: %s\n\nNothing was reverted. Fix forward or revert the merge commit by hand after triage.\n' \
+            "${{ steps.target.outputs.ref }}" "$BASE_BRANCH" "$MERGE_SHA" "$URL")
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY" || true
+          echo "::error::CI failed for the upstream sync: $URL"
+          exit 1
+
+      - name: Report already up to date
+        if: steps.check.outputs.up_to_date == 'true'
+        run: echo "Already synced with upstream ${{ steps.target.outputs.ref }}."
