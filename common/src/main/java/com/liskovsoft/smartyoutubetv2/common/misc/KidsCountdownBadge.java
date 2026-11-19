@@ -201,7 +201,7 @@ public class KidsCountdownBadge {
         // inCooldown flag) — not the limit alone; an elapsed-time-only anchor is not a boundary.
         // So the badge keeps counting the same budget until it is spent.
         long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes,
-                data.getUsedMs(), limitMs, data.isInCooldown())
+                data.getUsedMs(), limitMs, data.isInCooldown(), data.getExhaustedAtMs())
                 ? 0
                 : data.getUsedMs();
 

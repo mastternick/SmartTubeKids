@@ -70,6 +70,7 @@ public class KidsModeData {
     private long mWindowStartMs;           // epoch ms when the current reset window began
     private long mUsedMs;                  // watch time accumulated in the current window
     private long mBonusMs;                 // extra minutes granted by the parent in this window
+    private long mExhaustedAtMs;           // KIDS v1.12: epoch ms the quota was first crossed (0 = unknown)
 
     private KidsModeData(Context context) {
         mAppPrefs = AppPrefs.instance(context);
@@ -556,6 +557,7 @@ public class KidsModeData {
         mUsedMs = 0;
         mBonusMs = 0;
         mInCooldown = false;
+        mExhaustedAtMs = 0;
         persistData();
     }
 
@@ -571,13 +573,24 @@ public class KidsModeData {
     public void anchorCooldown(long expiryMs) {
         mWindowStartMs = expiryMs;
         mInCooldown = true;
+        // KIDS v1.12: the crossing is the real pause boundary and must survive this write. Only
+        // a legacy blob (unknown crossing) adopts the expiry as a best-effort boundary.
+        if (mExhaustedAtMs == 0) {
+            mExhaustedAtMs = expiryMs;
+        }
         persistData();
     }
 
     /**
-     * KIDS v1.9.5: the quota was replenished (extend / bonus / longer timer), so the current
-     * cooldown is no longer a pause at the old anchor. The flag alone is cleared; the anchor
-     * stays, and the controller re-anchors at the NEXT exhaustion instant.
+     * KIDS v1.9.5: the quota was replenished (extend / bonus / longer timer) or the child resumed
+     * watching, so the current cooldown is no longer a pause at the old anchor. The flag alone is
+     * cleared; the anchor stays, and the controller re-anchors at the NEXT exhaustion instant.
+     *
+     * KIDS v1.12: the persisted crossing is dropped too. It is the restart fallback for an
+     * exhaustion NOBODY resumed — once watching resumes, the pause clock stops (v1.10) and the
+     * next stop must anchor afresh, so keeping the crossing would measure the next pause from a
+     * moment the child was actively watching. A later exhaustion derives a fresh crossing on its
+     * own below→above transition.
      */
     public void clearCooldown() {
         if (!mInCooldown) {
@@ -585,6 +598,7 @@ public class KidsModeData {
         }
 
         mInCooldown = false;
+        mExhaustedAtMs = 0;
         persistData();
     }
 
@@ -592,13 +606,49 @@ public class KidsModeData {
         return mUsedMs;
     }
 
+    /**
+     * KIDS v1.12: epoch ms at which {@code usedMs} first reached {@code limitMs} in the current
+     * window, or 0 when unknown (a blob from an older build, or the counters were just reset).
+     * This is the instant the reset PAUSE really started — the wall-clock alternative to
+     * {@code windowStartMs}, which only carries it while {@code inCooldown} is set. Persisting it
+     * is what lets a process death between the counter save and the anchor save recover the true
+     * pause boundary instead of re-anchoring a fresh wait on the next app launch.
+     */
+    public long getExhaustedAtMs() {
+        return mExhaustedAtMs;
+    }
+
     public void setUsedMs(long ms) {
         mUsedMs = ms;
+        if (ms < KidsQuotaWindow.limitMs(mTimerMinutes, mBonusMs)) {
+            mExhaustedAtMs = 0; // quota unspent again: no crossing to remember
+        }
         persistData();
     }
 
+    /**
+     * KIDS v1.12: the counter is the only place that can observe the crossing itself, so the
+     * instant is derived and persisted in the SAME write: the overrun is
+     * {@code used - limit}, so the crossing was that many ms before now. Clamped to the window
+     * start (a clip cannot cross before its window) and to now (never in the future).
+     *
+     * Derived ONLY on the below→above transition: after {@link #clearCooldown()} (a resume) the
+     * counter is already above the limit, and re-deriving there would resurrect a boundary from
+     * accumulated overshoot — a moment the child was watching — instead of the next stop.
+     */
     public void addUsedMs(long deltaMs) {
+        long usedBefore = mUsedMs;
         mUsedMs += deltaMs;
+
+        long limitMs = KidsQuotaWindow.limitMs(mTimerMinutes, mBonusMs);
+
+        if (mExhaustedAtMs == 0 && limitMs > 0 && usedBefore < limitMs && mUsedMs >= limitMs) {
+            long now = System.currentTimeMillis();
+            long anchor = Math.max(mWindowStartMs, 1);
+            long crossedAt = now - (mUsedMs - limitMs);
+            mExhaustedAtMs = Math.min(now, Math.max(anchor, crossedAt));
+        }
+
         persistData();
     }
 
@@ -628,6 +678,14 @@ public class KidsModeData {
      * The caller persists: one synchronous file write.
      */
     private void applyParentTimeChange(long grantedBonusMs) {
+        // KIDS v1.12: a crossing only means "this exhaustion is still the running pause". The moment
+        // a parent change makes the quota spendable again it is history — and it must be dropped even
+        // with no pause anchored, because a grant handed out while the exhausted clip keeps playing
+        // leaves the flag clear while a restart blob may still carry the old crossing.
+        if (mUsedMs < KidsQuotaWindow.limitMs(mTimerMinutes, mBonusMs)) {
+            mExhaustedAtMs = 0;
+        }
+
         if (!mInCooldown) {
             return;
         }
@@ -639,8 +697,10 @@ public class KidsModeData {
             mUsedMs = 0;
             mBonusMs = Math.max(0, grantedBonusMs);
             mInCooldown = false;
+            mExhaustedAtMs = 0;
         } else if (mUsedMs < KidsQuotaWindow.limitMs(mTimerMinutes, mBonusMs)) {
             mInCooldown = false;
+            mExhaustedAtMs = 0; // quota replenished: the old crossing is not a boundary anymore
         }
     }
 
@@ -683,6 +743,13 @@ public class KidsModeData {
         mInCooldown           = Helpers.parseBoolean(split, 24, false); // KIDS v1.9.5: in cooldown from exhaustion? (default: no)
         mPinRequiredAfterMash = Helpers.parseBoolean(split, 25, true); // KIDS v1.9.6: PIN after 10-press mash (default: yes)
         mBedtimeMinutes       = sanitize(split, 26, KidsBedtime.allowedMinutes(), KidsBedtime.OFF); // KIDS v1.10: night scene after hour
+        // KIDS v1.12: the instant the quota was crossed, appended after the bedtime slot so an
+        // older blob (which ends at 26) yields 0 = unknown. Nonsense values are dropped: a
+        // crossing cannot precede the window start, and a clock change can leave it in the
+        // future — both mean "unknown", never a bogus pause boundary.
+        long exhaustedAtMs    = Helpers.parseLong(split, 27, 0);
+        mExhaustedAtMs        = exhaustedAtMs > 0 && exhaustedAtMs >= mWindowStartMs
+                && exhaustedAtMs <= System.currentTimeMillis() ? exhaustedAtMs : 0;
     }
 
     /**
@@ -710,6 +777,6 @@ public class KidsModeData {
                         mIsMenuProviderRegistered, mVisibleSections, mIsSearchEnabled, mKidsPlaylists,
                         mIsKioskEnabled, mHiddenPins, mForceStopOnExpire, mKioskReleased, mRelockOnBoot,
                         mLockAtVideoEnd, mResetIntervalMinutes, mWarnBeforeMinutes, mUseMileMarker, mInCooldown,
-                        mPinRequiredAfterMash, mBedtimeMinutes));
+                        mPinRequiredAfterMash, mBedtimeMinutes, mExhaustedAtMs));
     }
 }

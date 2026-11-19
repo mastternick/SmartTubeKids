@@ -235,7 +235,8 @@ public class KidsTimeUpLock {
         // by the clock, so a stored anchor without the inCooldown flag (parent lowered the timer,
         // or a crash between the counter and anchor saves) is not "expired" — the budget stays spent.
         long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
-                data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown()) ? 0 : data.getUsedMs();
+                data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown(),
+                data.getExhaustedAtMs()) ? 0 : data.getUsedMs();
 
         return usedMs >= limitMs;
     }
@@ -656,7 +657,8 @@ public class KidsTimeUpLock {
         }
 
         return KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
-                data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown());
+                data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown(),
+                data.getExhaustedAtMs());
     }
 
     /**

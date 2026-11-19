@@ -55,18 +55,32 @@ public final class KidsQuotaWindow {
      * KidsModeController.accumulatePlayTime — is not a boundary, so no rollover happens and the
      * false "fresh quota" never appears. KidsModeController.anchorCooldownIfNeeded() writes a
      * proper pause anchor on the next check instead.
+     *
+     * KIDS v1.12: the pause boundary no longer depends on the flag alone. {@code exhaustedAtMs}
+     * is the persisted instant the quota was crossed, so a blob left at "used >= limit,
+     * inCooldown = false" by a process death still knows when the pause really began: the
+     * boundary is the crossing, and time spent with the box off counts against the pause. A 0
+     * crossing (blob from an older build) keeps the old behaviour — known only once
+     * anchorCooldownIfNeeded() writes the anchor.
      */
     public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalMinutes,
-                                          long usedMs, long limitMs, boolean inCooldown) {
+                                          long usedMs, long limitMs, boolean inCooldown,
+                                          long exhaustedAtMs) {
         if (limitMs <= 0 || storedWindowStartMs <= 0) {
             return true; // no quota / no anchor: nothing to wait for, start fresh
         }
 
-        if (!inCooldown || usedMs < limitMs) {
-            return false; // no pause anchored at exhaustion — never replenish
+        if (usedMs < limitMs) {
+            return false; // quota not spent yet — no pause exists, never replenish
         }
 
-        return isPauseElapsed(storedWindowStartMs, nowMs, intervalMinutes);
+        long boundary = inCooldown ? storedWindowStartMs : exhaustedAtMs;
+
+        if (boundary <= 0) {
+            return false; // pause never anchored and its crossing unknown: nothing to expire
+        }
+
+        return isPauseElapsed(boundary, nowMs, intervalMinutes);
     }
 
     /**
