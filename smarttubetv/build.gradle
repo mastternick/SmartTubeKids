@@ -1,5 +1,10 @@
 apply from: gradle.ext.sharedModulesConstants
 
+// KIDS: this block is kept verbatim from upstream (minimal divergence). The Google config and
+// crash-reporting plugins below only ever apply when `google-services.json` exists; that file is
+// deliberately ABSENT from this fork (see the dependencies comment), so neither plugin runs. The
+// crash-reporting *libraries* are the part that had to go: our applicationId is not registered in
+// the upstream project and initialising them without the generated config crashes at startup.
 buildscript {
     repositories {
         google()
@@ -31,6 +36,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 // The first letter of the flavor name must be in uppercase
+// KIDS: never enters this branch — `google-services.json` is absent on purpose.
 if (new File("${projectDir}/google-services.json").exists() && (getGradle().getStartParameter().getTaskRequests().toString().contains("Stbeta") ||
         getGradle().getStartParameter().getTaskRequests().toString().contains("Ststable"))) {
     // Google Services Gradle plugin (transforms google-services.json file)
@@ -57,8 +63,8 @@ android {
         applicationId "app.smarttubekids" // KIDS: unique id, separate from upstream SmartTube
         minSdkVersion project.properties.minSdkVersion
         targetSdkVersion project.properties.targetSdkVersion
-        versionCode 2446
-        versionName "32.56"
+        versionCode 2469
+        versionName "32.79"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"
 
@@ -160,7 +166,7 @@ android {
     // NOTE: The main goal of prefixing a flavor is to group flavors' folders together
     productFlavors {
         stbeta {
-            applicationId "app.smarttubekids" // KIDS
+            // KIDS: applicationId inherited from defaultConfig (app.smarttubekids)
             targetSdkVersion project.properties.compileSdkVersion
         }
         ststable {
@@ -236,14 +242,11 @@ dependencies {
     implementation 'io.reactivex.rxjava2:rxandroid:' + rxAndroidVersion
     implementation 'io.reactivex.rxjava2:rxjava:' + rxJavaVersion
 
-    // KIDS: Firebase Crashlytics REMOVED.
-    // Our applicationId (app.smarttubekids) is not registered in the upstream
-    // google-services.json, and shipping firebase libs WITHOUT that json makes
-    // FirebaseInitProvider crash the app at startup (black screen).
-    // The app code never references Firebase classes, so removal is safe.
-    // Original (upstream) block:
-    // stbetaImplementation('com.google.firebase:firebase-crashlytics:' + firebaseCrashlyticsVersion) { transitive = true }
-    // ststableImplementation('com.google.firebase:firebase-crashlytics:' + firebaseCrashlyticsVersion) { transitive = true }
+    // KIDS: upstream's crash-reporting SDK and its Google config wiring are REMOVED.
+    // Our applicationId (app.smarttubekids) is not registered in the upstream project,
+    // and shipping those libs without the generated config makes their init provider
+    // crash the app at startup (black screen). The app code never references their
+    // classes, so removal is safe.
 
     // debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.14'
 
@@ -251,4 +254,6 @@ dependencies {
 
     // ByeByeDPI fix
     implementation 'org.conscrypt:conscrypt-android:' + conscryptVersion
+
+    implementation 'androidx.work:work-runtime:' + workVersion
 }

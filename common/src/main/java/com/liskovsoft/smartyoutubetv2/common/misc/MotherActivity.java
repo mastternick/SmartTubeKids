@@ -259,7 +259,6 @@ public class MotherActivity extends FragmentActivity {
         // KIDS: window for the time-up PIN dialog when the kiosk key guard swallows the
         // escape key (HOME/RECENTS) before this activity ever sees it.
         sResumedActivity = new WeakReference<>(this);
-
         try {
             super.onResume();
         } catch (IllegalArgumentException e) {
@@ -295,7 +294,6 @@ public class MotherActivity extends FragmentActivity {
         // (the playback activity finished; this one must not show the playlist).
         // In-memory flag only: nothing is locked after a process restart.
         KidsTimeUpLock.applyOnResume(this);
-
         // Restore this activity's screensaver policy after returning to the foreground.
         mScreensaverManager.resume();
     }
@@ -308,7 +306,6 @@ public class MotherActivity extends FragmentActivity {
         if (sResumedActivity != null && sResumedActivity.get() == this) {
             sResumedActivity = null;
         }
-
         // Stop managing the screensaver so a paused activity cannot keep the display awake.
         mScreensaverManager.suspend();
     }
