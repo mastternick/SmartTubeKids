@@ -197,11 +197,12 @@ public class KidsCountdownBadge {
 
         // A window that already moved on means a fresh quota. The rollover itself is done by
         // KidsModeController on its next tick — this must not write preferences every second.
-        // KIDS v1.9.7: "moved on" requires BOTH the limit reached AND the pause anchored (the
-        // inCooldown flag) — not the limit alone; an elapsed-time-only anchor is not a boundary.
-        // So the badge keeps counting the same budget until it is spent.
+        // KIDS v1.9.7: "moved on" requires BOTH the limit reached AND a pause boundary (the
+        // inCooldown anchor, else the v1.12 last watched instant) — not the limit alone; an
+        // elapsed-time-only anchor is not a boundary. So the badge keeps counting the same
+        // budget until it is spent.
         long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), now, intervalMinutes,
-                data.getUsedMs(), limitMs, data.isInCooldown(), data.getExhaustedAtMs())
+                data.getUsedMs(), limitMs, data.isInCooldown(), data.getLastWatchMs())
                 ? 0
                 : data.getUsedMs();
 

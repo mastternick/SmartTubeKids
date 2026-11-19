@@ -109,7 +109,10 @@ jobs:
           BODY=$(printf 'Merging upstream `%s` (`%s`) into `%s` produced conflicts in:\n\n```\n%s\n```\n\nThe workflow never auto-resolves conflicts. Resolve on a sync branch by hand (policy: KIOSK.md / the merge notes), keep the KIDS deltas, then merge to `%s`.\n' \
             "${{ steps.target.outputs.ref }}" "${{ steps.target.outputs.sha }}" "$BASE_BRANCH" \
             "$(cat "$RUNNER_TEMP/conflicts.txt")" "$BASE_BRANCH")
-          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $TITLE" --json number --jq '.[0].number // empty')
+          # Match the exact title through the API: `--search "in:title $TITLE"` gets parsed as
+          # qualifiers (the colon and spaces) and can silently miss, creating a duplicate issue.
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\") | .number] | first // empty")
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
           else
@@ -129,7 +132,11 @@ jobs:
           test -f KIOSK.md
           test -f common/src/main/java/com/liskovsoft/smartyoutubetv2/common/misc/KidsNightScene.java
           test -f common/src/main/java/com/liskovsoft/smartyoutubetv2/common/misc/KioskKeyGuardService.java
-          git add -A
+          # The trial merge already staged exactly the merged result. Commit that index as-is:
+          # blanket staging would also add stray files and (with submodules: false) submodule
+          # gitlinks, and this commit is pushed to kids before CI runs.
+          git diff --name-only --diff-filter=U | (! grep -q .)
+          git diff --cached --name-only | head -50 || true
           git commit -m "Upstream ${{ steps.target.outputs.ref }}: merge official SmartTube into kids" \
                      -m "Automatic sync by .github/workflows/upstream-sync.yml. Conflicts: none. KIDS deltas preserved (build.gradle ids/flavors/APK naming, locales union, MotherActivity key guard, MainApplication migration hook). CI is dispatched for this exact commit; a red build is reported in an issue and is not reverted automatically."
 

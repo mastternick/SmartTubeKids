@@ -604,9 +604,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * reached, so nothing rolls over before exhaustion — {@link KidsQuotaWindow#isWindowExpired}
      * returns false while {@code used < limit}, and the child's budget simply keeps being spent
      * down across sessions. Once exhausted, the pause boundary is the anchor written at
-     * exhaustion when {@code inCooldown} is set, or — KIDS v1.12 — the persisted crossing
-     * instant ({@code exhaustedAtMs}) when the flag is missing, so a restart after the pause
-     * elapsed rolls over here immediately. The pause anchor itself is written when the exhausted
+     * exhaustion when {@code inCooldown} is set, or — KIDS v1.12 — the last watched instant
+     * ({@code lastWatchMs}) when the flag is missing, so a restart after the pause elapsed rolls
+     * over here immediately. The pause anchor itself is written when the exhausted
      * playback STOPS (with force-stop ON: at the cut instead) by
      * {@link #anchorCooldownIfNeeded()}, and the pause lasts exactly one interval from the
      * boundary; the anchor written here is {@code now}, i.e. the rollover, so the next window
@@ -618,12 +618,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
 
         if (!KidsQuotaWindow.isWindowExpired(mKidsData.getWindowStartMs(), now, intervalMinutes,
                 mKidsData.getUsedMs(), getLimitMs(), mKidsData.isInCooldown(),
-                mKidsData.getExhaustedAtMs())) {
+                mKidsData.getLastWatchMs())) {
             return;
         }
 
         // KIDS v1.10/v1.12: never mutate the window while the exhausted clip is still running
-        // with force stop OFF — the crossing fallback could otherwise roll over mid-clip.
+        // with force stop OFF — the fallback boundary could otherwise roll over mid-clip.
         if (mLastPlayStartMs != 0 && !isForceStopActive()) {
             return;
         }
@@ -662,9 +662,9 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * rollover), which is what makes the budget spendable across sessions. The flag is what
      * turns the window start into a pause boundary; without it — a parent lowering the timer
      * below the already-counted usedMs, a crash between addUsedMs and the anchor save, or
-     * {@code onPlay} clearing it — the KIDS v1.12 crossing instant is the fallback boundary
-     * when known, and this method anchors at that instant instead of at {@code now}; only an
-     * old blob (crossing 0 = unknown) anchors a fresh pause here.
+     * {@code onPlay} clearing it — the KIDS v1.12 last watched instant is the fallback boundary
+     * when known, and this method anchors at that instant instead of at {@code now}; without it
+     * the window start is the only evidence left, and only a 0 boundary anchors a fresh pause.
      *
      * The flag is cleared in two places: at the source, by
      * {@code KidsModeData.applyParentTimeChange(...)}, which both setters call (a replenish while
@@ -695,14 +695,21 @@ public class KidsModeController extends BasePlayerController implements TickleMa
         }
 
         if (!mKidsData.isInCooldown()) {
-            // KIDS v1.12: with the crossing known, the pause boundary is that instant — a
-            // restart 10 h after the crossing must not hand the child a fresh interval. The
-            // anchor is clamped to the window start so it never precedes the window it belongs
-            // to. An unknown crossing (older blob) keeps today's behaviour: anchor at now.
-            long crossedAtMs = mKidsData.getExhaustedAtMs();
-            mKidsData.anchorCooldown(crossedAtMs > 0
-                    ? Math.max(crossedAtMs, getWindowStartMs())
-                    : System.currentTimeMillis());
+            // KIDS v1.12: with the last watched instant known, the pause boundary is that
+            // instant — a restart hours after the child stopped watching must not hand them a
+            // fresh interval from the restart. The crossing would be wrong: with force stop OFF
+            // the clip may run for hours past the limit, and crediting that overrun as pause
+            // would open the gate too early. The boundary is clamped to the window start so it
+            // never precedes the window it belongs to. An unknown boundary (older blob) keeps
+            // today's behaviour: anchor at now.
+            long lastWatchMs = mKidsData.getLastWatchMs();
+            // Unknown watch instant (legacy blob): the window start is NOT evidence of when the
+            // child stopped, and anchoring there would expire the pause immediately. Only real
+            // evidence is clamped to the window start; without it the pause starts now.
+            long boundary = lastWatchMs > 0
+                    ? Math.max(lastWatchMs, mKidsData.getWindowStartMs())
+                    : System.currentTimeMillis();
+            mKidsData.anchorCooldown(boundary);
         }
     }
 

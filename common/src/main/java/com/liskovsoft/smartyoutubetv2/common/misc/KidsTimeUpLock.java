@@ -97,6 +97,11 @@ public class KidsTimeUpLock {
     // The celebration is posted once per gate: a resume re-runs scheduleRolloverCheck, and
     // re-posting there would restart the 3 s countdown forever.
     private static boolean sOpenGatePending;
+    // KIDS v1.13: the persisted quota is inspected exactly once per PROCESS. onResume runs for
+    // every activity (the playback one included), and at bedtime with force stop OFF a mid-clip
+    // resume (dialog, PIP, settings) would otherwise re-arm the night gate and cut a clip the
+    // parent allowed to finish. Not reset on release: this is per process, not per gate.
+    private static boolean sRestoreChecked;
 
     private KidsTimeUpLock() {
     }
@@ -243,7 +248,7 @@ public class KidsTimeUpLock {
         // or a crash between the counter and anchor saves) is not "expired" — the budget stays spent.
         long usedMs = KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
                 data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown(),
-                data.getExhaustedAtMs()) ? 0 : data.getUsedMs();
+                data.getLastWatchMs()) ? 0 : data.getUsedMs();
 
         return usedMs >= limitMs;
     }
@@ -378,11 +383,22 @@ public class KidsTimeUpLock {
      * night scene, otherwise the mile marker if the parent picked it. {@link #armQuotaGate}
      * schedules the rollover one-shot, whose boundary is the persisted {@code windowStartMs},
      * so the restored gate still opens by itself at the end of the pause.
+     *
+     * KIDS v1.13: the check runs ONCE PER PROCESS ({@link #sRestoreChecked}). The first resume
+     * after a process start is the only one that may invent a gate; later resumes only re-apply
+     * an existing one ({@link #applyOnResume}). Without that, a mid-clip resume at bedtime with
+     * "stop immediately" OFF would re-arm the night gate and cut a clip the parent let finish.
      */
     public static void restoreIfDue(Activity activity) {
+        if (sRestoreChecked) {
+            return; // the persisted quota was already judged on this process's first resume
+        }
+
         if (sLocked || activity == null) {
             return;
         }
+
+        sRestoreChecked = true;
 
         Context context = activity.getApplicationContext();
 
@@ -421,15 +437,16 @@ public class KidsTimeUpLock {
         // KIDS v1.13: scheduling the auto-open needs a real pause boundary.
         // scheduleRolloverCheck() bails out unless used >= limit AND inCooldown, and a cold
         // browse-only launch has no controller tick to write that flag yet (the controllers are
-        // built from PlaybackPresenter.onViewInitialized, not from instance()). A restart blob
-        // normally carries the crossing (v1.12); a legacy blob carries none, and the only honest
-        // boundary there is "now" — same as the controller's own fallback, and it still gives the
-        // gate its automatic opening one interval later. Without this the restored gate would
-        // have NO automatic opening at all.
+        // built from PlaybackPresenter.onViewInitialized, not from instance()). The persisted
+        // boundary is the LAST WATCHED instant (v1.12) — never the moment the quota was crossed,
+        // which with "stop immediately" OFF can be hours earlier and would credit the overrun as
+        // pause. A legacy blob carries none, and the only honest boundary there is "now" — same
+        // as the controller's own fallback, and it still gives the gate its automatic opening one
+        // interval later. Without this the restored gate would have NO automatic opening at all.
         if (!data.isInCooldown()) {
             long now = System.currentTimeMillis();
-            long crossing = data.getExhaustedAtMs();
-            long boundary = crossing > 0 ? Math.max(crossing, data.getWindowStartMs()) : now;
+            long lastWatchMs = data.getLastWatchMs();
+            long boundary = lastWatchMs > 0 ? Math.max(lastWatchMs, data.getWindowStartMs()) : now;
 
             if (KidsQuotaWindow.isPauseElapsed(boundary, now, data.getResetIntervalMinutes())) {
                 data.resetWindow(now); // the pause already ran out: fresh quota, no gate
@@ -438,7 +455,7 @@ public class KidsTimeUpLock {
             }
 
             data.anchorCooldown(boundary);
-            Log.d(TAG, "Time-up gate: pause boundary normalised (boundary=%s, crossing=%s)", boundary, crossing);
+            Log.d(TAG, "Time-up gate: pause boundary normalised (boundary=%s, lastWatch=%s)", boundary, lastWatchMs);
         }
 
         if (bedtime) {
@@ -801,7 +818,7 @@ public class KidsTimeUpLock {
 
         return KidsQuotaWindow.isWindowExpired(data.getWindowStartMs(), System.currentTimeMillis(),
                 data.getResetIntervalMinutes(), data.getUsedMs(), limitMs, data.isInCooldown(),
-                data.getExhaustedAtMs());
+                data.getLastWatchMs());
     }
 
     /**

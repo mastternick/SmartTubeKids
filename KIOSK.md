@@ -294,28 +294,30 @@ KIDS v1.9.5 replaced the clock-aligned grid with **cooldown-from-exhaustion** se
 made the reset interval a **pause that only starts when the watch limit is reached** — it is not a rolling
 window at all. Until the quota is exhausted nothing resets: the child's budget keeps being spent down across
 sessions, however many days that takes, because `KidsQuotaWindow.isWindowExpired` returns false for any stored
-anchor while `used < limit` **or while the `inCooldown` flag is clear** and no crossing instant is known —
+anchor while `used < limit` **or while the `inCooldown` flag is clear** and no last watched instant is known —
 elapsed time alone never proves a pause is running. An anchor without the flag (the parent lowered the timer
 below the already-counted `used`, or the process died before `stopCounting()` could anchor the pause and the
 idle `onTickle()` has not run yet) is not a pause boundary, so it alone can never trigger a rollover.
-KIDS v1.12 adds the missing evidence: the instant the quota was CROSSED (`exhaustedAtMs`, blob index 27,
-written by `KidsModeData.addUsedMs` in the same write as the counter) is the fallback pause boundary, so a
-restart after a power cut recovers the real pause instead of anchoring a fresh one (see
-"KIDS v1.12: the pause survives a restart" below). Without that crossing — an old blob — the behaviour is
-unchanged: `anchorCooldownIfNeeded()` anchors a fresh pause at `now`, so a false "fresh quota" can never
-appear. The anchor means nothing before exhaustion and the PAUSE anchor is written **when the exhausted
-playback STOPS** (`KidsModeController.anchorCooldownIfNeeded()`, called from `stopCounting()` — pause, end of
-clip, released engine — and from the idle `onTickle()` for an exhaustion nothing is playing anymore, once per
-exhaustion thanks to the persisted `inCooldown` flag, blob index 24), so the pause is exactly
-`[T, T + interval)` from that instant. With **Stop immediately** ON the cut is the stop, so the pause starts at
-the cut; with it OFF the running clip finishes first (see the v1.10 reset-timing section below).
+KIDS v1.12 adds the missing evidence: the **last watched instant** (`lastWatchMs`, blob index 27,
+recorded by `KidsModeData.addUsedMs` in the same write as the counter on every counted minute) is the
+fallback pause boundary, so a restart after a power cut recovers the real pause instead of anchoring a
+fresh one (see "KIDS v1.12: the pause survives a restart" below). Without that value — an old blob —
+the boundary falls back to `windowStartMs` (the only evidence left), or to `now` when even that is
+0, and `resetWindowIfNeeded()` rolls over instead of arming a fresh wait when the pause has already
+elapsed. The anchor means nothing before exhaustion and the PAUSE anchor is
+written **when the exhausted playback STOPS** (`KidsModeController.anchorCooldownIfNeeded()`, called
+from `stopCounting()` — pause, end of clip, released engine — and from the idle `onTickle()` for an
+exhaustion nothing is playing anymore, once per exhaustion thanks to the persisted `inCooldown` flag,
+blob index 24), so the pause is exactly `[T, T + interval)` from that instant. With **Stop
+immediately** ON the cut is the stop, so the pause starts at the cut; with it OFF the running clip
+finishes first (see the v1.10 reset-timing section below).
 `KidsModeData.resetWindow()` does store a timestamp at rollover as well; it is simply not a pause
 boundary without the flag, and `isWindowExpired` never treats it as one. The rollover —
 in the controller (`resetWindowIfNeeded`) and in the gate one-shot (`KidsTimeUpLock.scheduleRolloverCheck`) —
 then writes the fresh quota and starts the next window at `now`. Because a scheduled check always has an
 exhaustion anchor, the gate one-shot always waits a full interval from exhaustion: no boundary exists before
 that, and `scheduleRolloverCheck` refuses to schedule at all while `used < limit` **or `inCooldown` is clear**
-— so a crossing-known, flag-clear blob is never scheduled by the gate directly: the controller anchors (or rolls
+— so a last-watch-known, flag-clear blob is never scheduled by the gate directly: the controller anchors (or rolls
 over) first, and the gate is only ever armed after that (otherwise the one-shot would fire into
 `onRolloverCheck`, see "not expired yet" and re-post itself every `ROLLOVER_MIN_MS`). The car plus the gate
 read the SAME stored anchor, so the Mile Marker car reaches lamp 10 exactly at the reset instant and the
@@ -622,10 +624,10 @@ Edge cases, on purpose:
   a boundary), so the next stop re-anchors the full pause and no rollover can land mid-clip. With force-stop ON
   the anchor is kept so the gate still opens one interval after the cut.
 - Process death while exhausted and playing: no anchor is written until the next `stopCounting()`/`onTickle()`.
-  Since v1.12 the crossing instant `exhaustedAtMs` is persisted, so a restart recovers the real pause boundary
-  instead of anchoring a fresh wait (see the next section).
-- No blob index was added by v1.10 itself; v1.12 appends index 27 (the crossing instant) and otherwise leaves
-  `KidsQuotaWindow`'s rule and `KidsModeData`'s earlier slots untouched.
+  Since v1.12 the last watched instant `lastWatchMs` is persisted on every counted minute, so a restart
+  recovers the real pause boundary instead of anchoring a fresh wait (see the next section).
+- No blob index was added by v1.10 itself; v1.12 appends index 27 (the last watched instant) and otherwise
+  leaves `KidsQuotaWindow`'s rule and `KidsModeData`'s earlier slots untouched.
 
 **Device smoke (pending — needs the parental PIN):** set limit 15 min, reset 5 min, **Stop immediately** OFF and
 start a 30-minute clip → at 15:00 the badge reaches `0:01` and then disappears, and the quota does NOT roll over
@@ -637,7 +639,7 @@ later.
 
 **The bug.** The quota was exhausted, the box was powered off overnight, and opening the app ~10 h later showed
 the Mile Marker car again — a fresh 3 h pause instead of the one that had already elapsed. `KidsModeData` stored
-`usedMs`, `windowStartMs` and `inCooldown`, but never WHEN the quota was crossed. A blob left at
+`usedMs`, `windowStartMs` and `inCooldown`, but never WHEN the child was last actually watching. A blob left at
 "`used >= limit`, `inCooldown == false`" therefore had no boundary: `isWindowExpired` answered false, nothing
 rolled over, and `anchorCooldownIfNeeded()` anchored a fresh pause at the next app start (the first
 `PlaybackPresenter.instance(...)` tickles it, before any play).
@@ -651,66 +653,68 @@ Three ways that ambiguous state arises:
 3. **`onPlay` clearing the flag**: starting a clip after exhaustion drops `inCooldown` (the pause clock stops),
    and a death before the next stop leaves the spent budget with no flag.
 
-**The fix.** `KidsModeData.addUsedMs` derives the crossing instant in the SAME write as the counter:
-`exhaustedAtMs = clamp(now − (used − limit), max(windowStartMs, 1), now)`, persisted as blob index 27.
-`KidsQuotaWindow.isWindowExpired` now takes that value and, when `inCooldown` is clear, uses the crossing as the
-pause boundary. `anchorCooldownIfNeeded()` anchors at the crossing (clamped to the window start) rather than at
-`now`, and `resetWindowIfNeeded()` rolls over first when the crossing + interval has already elapsed, so the
-child gets the fresh quota the elapsed pause earned instead of a new wait. The gate (`KidsTimeUpLock`) and the
-countdown badge pass the same value, so car, badge and gate share one predicate.
+**The fix.** `KidsModeData.addUsedMs` records the LAST WATCHED instant in the SAME write as the counter,
+on every accepted delta: `lastWatchMs = clamp(now, max(windowStartMs, 1), now)`, persisted as blob
+index 27. `KidsQuotaWindow.isWindowExpired` now takes that value and, when `inCooldown` is clear, uses
+the last watched instant as the pause boundary. `anchorCooldownIfNeeded()` anchors at
+`max(lastWatchMs, windowStartMs)` when that is positive, else at `now`, and `resetWindowIfNeeded()`
+rolls over first when that boundary + interval has already elapsed, so the child gets the fresh quota
+the elapsed pause earned instead of a new wait. The gate (`KidsTimeUpLock`) and the countdown badge
+pass the same value, so car, badge and gate share one predicate.
 
-**The crossing is not a permanent fact.** It is the restart fallback for an exhaustion NOBODY resumed, so two
-invariants keep v1.10's "the pause clock stops on resume" intact:
+**Why the last watch and not the crossing.** With **Stop immediately** OFF a clip is allowed to finish,
+so it can run for hours past the limit. The instant the quota was CROSSED would credit that whole
+overrun as pause: a box killed at 22:00 after a context that crossed at 18:00 would look like a pause
+that ran 4 h and hand out a fresh quota immediately. The last counted minute keeps the pause honest —
+it starts when the child actually stopped watching. It also removes a badge inconsistency: mid-clip the
+crossing + interval could expire while the controller (correctly) refuses to roll over, so the badge
+would flip to a fresh quota the hard stop does not honour.
 
-1. **`clearCooldown()` drops the crossing** (`mExhaustedAtMs = 0`, same `persistData()` as the flag). It is
-   called when the child resumes a clip after exhaustion (`KidsModeController.onPlay`), and a caller that
-   replenishes the quota makes the crossing history through `applyParentTimeChange()` instead (see the next
-   point). Keeping a crossing past a resume would make the next stop anchor at a moment the child was actively
-   watching, so the pause would be measured from the old crossing instead of the new stop.
-2. **`applyParentTimeChange()` drops the crossing independently of the flag** — its new first statement clears
-   `mExhaustedAtMs` whenever the post-change limit makes the quota spendable, *before* the `!inCooldown` early
-   return. Without it, a grant handed out while the exhausted clip keeps playing (flag clear, crossing inherited
-   from a restart) would survive and end the next pause early. A timer cut that leaves `used >= limit` keeps the
-   crossing, i.e. the running pause.
-3. **`addUsedMs` derives the crossing only on the below→above transition** (`usedBefore < limitMs &&
-   mUsedMs >= limitMs`). After a resume the counter is already above the limit; re-deriving there would
-   resurrect a boundary from accumulated overshoot. A later exhaustion (after a real replenishment brings
-   `used` back below the limit) derives a fresh crossing on its own transition.
+**The field is not a permanent fact.** It is cleared when the counters roll over (`resetWindow`), when
+a parent change makes the quota spendable (`applyParentTimeChange`'s first statement, before its
+`!inCooldown` early return), and by `setUsedMs` below the limit. It is deliberately NOT cleared by
+`clearCooldown()`: with "Stop immediately" OFF the clip keeps playing after a resume, so every counted
+minute must keep moving the instant — dropping it there would make the next death fall back to `now`.
+`anchorCooldown()` does not adopt it either; the pause anchor lives in `windowStartMs` while the flag
+is set.
 
 Two load-bearing scenarios (limit exhausted at 18:00, interval 3 h):
 
-- **Scenario A — power cut, no resume.** The quota crosses at 18:00 during a clip; `addUsedMs` writes
-  `exhaustedAtMs = 18:00` `(now − (used − limit))`. The box dies at 18:05 before `stopCounting()`, so
-  `inCooldown` stays false. At 21:10 the app starts: `isWindowExpired` sees `used >= limit`, the flag clear and
-  boundary 18:00, and 21:10 − 18:00 ≥ 3 h → `resetWindowIfNeeded()` writes `resetWindow(21:10)` (fresh quota)
-  before any anchor; `anchorCooldownIfNeeded()` then finds `used = 0 < limit` and does nothing. The child gets
-  the fresh quota the elapsed pause earned and **no gate** appears.
-- **Scenario B — the child resumes.** Same 18:00 crossing; at 19:00 the child presses PLAY,
-  `KidsModeController.onPlay` calls `clearCooldown()` → flag false AND crossing 0 (a subsequent `addUsedMs`
-  cannot re-derive it: the counter was already above the limit). They watch 20 min and stop at 19:20;
-  `anchorCooldownIfNeeded()` sees crossing 0 and anchors `anchorCooldown(19:20)`, `windowStartMs = 19:20`,
-  flag true. The gate opens at **22:20**, not 21:00 — the pause restarted at the stop, exactly as v1.10
-  requires.
+- **Scenario A — 10 h idle.** The quota is spent at 18:00, so `addUsedMs` writes `lastWatchMs = 18:00`.
+  The box dies at 18:05 before `stopCounting()`, so `inCooldown` stays false. At 04:00 (10 h after the
+  last watched minute) the app starts: `isWindowExpired` sees `used >= limit`, the flag clear and
+  boundary 18:00, and 04:00 − 18:00 ≥ 3 h → `resetWindowIfNeeded()` writes `resetWindow(04:00)` (fresh
+  quota) before any anchor; `anchorCooldownIfNeeded()` then finds `used = 0 < limit` and does nothing.
+  The child gets the fresh quota the elapsed pause earned and **no gate** appears.
+- **Scenario B — 4 h overrun, then a kill.** **Stop immediately** OFF, the quota crosses at 18:00 but
+  the clip runs to 22:00; every counted minute moves `lastWatchMs`, so the blob says 22:00 (and
+  `used = limit + 4 h`). The box is killed at 22:05 before `stopCounting()`. Restart at 23:00:
+  23:00 − 22:00 < 3 h → the quota stays exhausted and no rollover happens, so a due gate (force stop
+  on, or bedtime) is restored and anchored at 22:00. The gate opens at **01:00**, 3 h after the last
+  watched minute — not at 21:00 as the crossing would have claimed. Restart at 01:30 instead and the
+  pause has elapsed: fresh quota, no gate.
 
-Behaviour table (the "boundary" is `windowStartMs` while `inCooldown` is set, else `exhaustedAtMs`):
+Behaviour table (the "boundary" is `windowStartMs` while `inCooldown` is set, else `lastWatchMs`):
 
-| `inCooldown` | `exhaustedAtMs` | elapsed since boundary | result |
+| `inCooldown` | `lastWatchMs` | elapsed since boundary | result |
 |---|---|---|---|
 | — (any) | any | n/a, `used < limit` | no rollover — the pause has not started |
 | true | any (ignored) | `< interval` | pause continues, gate stays armed |
 | true | any (ignored) | `>= interval` | rollover to a fresh quota |
-| false | `0` (old blob, or a resume dropped it) | — | no rollover; the controller anchors a fresh pause at `now` (pre-v1.12 behaviour) |
-| false | `> 0` (crossing) | `< interval` | pause continues from the crossing |
-| false | `> 0` (crossing) | `>= interval` | **rollover immediately** — the reported bug |
+| false | `0` (old blob, or just reset) | — | no rollover in the predicate; the controller anchors at the window start, or at `now` when that is 0 |
+| false | `> 0` (last watch) | `< interval` | pause continues from the last watched minute |
+| false | `> 0` (last watch) | `>= interval` | **rollover immediately** — the reported bug |
 
-**Blob rule: append only.** `exhaustedAtMs` is the 28th item (index 27), appended after `mBedtimeMinutes`; no
-existing index moves. An older blob ends at index 26, so `parseLong(..., 27, 0)` yields 0 = unknown and the
-pre-v1.12 path is taken. Nonsense values are dropped to 0 (`<= 0`, `< windowStartMs`, or `> now` after a clock
-change). A downgrade to a build without index 27 simply drops the field — the counters, the flag and the anchor
-remain readable, so the only loss is the restart recovery.
+**Blob rule: append only.** `lastWatchMs` is the 28th item (index 27), appended after `mBedtimeMinutes`;
+no existing index moves. An older blob ends at index 26, so `parseLong(..., 27, 0)` yields 0 = unknown
+and the pre-v1.12 path is taken. Pre-release builds wrote the crossing into this slot; a crossing is
+always ≤ the last watched instant of the same window, so such a blob is safe to read as-is (it merely
+errs on the side of an earlier boundary). Nonsense values are dropped to 0 (`<= 0`, `< windowStartMs`,
+or `> now` after a clock change). A downgrade to a build without index 27 simply drops the field — the
+counters, the flag and the anchor remain readable, so the only loss is the restart recovery.
 
 **Mid-clip guard.** `resetWindowIfNeeded()` refuses to mutate the window while `mLastPlayStartMs != 0` unless
-force stop is active, exactly like the v1.10 anchor guard: the new crossing fallback is evaluated on
+force stop is active, exactly like the v1.10 anchor guard: the fallback boundary is evaluated on
 `accumulatePlayTime` ticks too, and a > interval clip must never roll over mid-clip through it. With
 "Stop immediately" ON the cut is the stop, so the rollover-authorized path is intact.
 
@@ -785,9 +789,13 @@ closing a way the gate could be lost:
    marker if selected). The rollover one-shot is re-scheduled from the persisted
    `windowStartMs`, so a restored gate still opens by itself at the end of the pause; a blob
    whose pause flag was never written (a cold launch has no controller tick yet, a legacy blob
-   has no crossing at all) is normalised first — boundary = the recorded crossing, else "now" —
-   so the auto-open always has one. If that boundary has already elapsed, the quota is rolled
-   over and no gate is armed.
+   has no last watched instant at all) is normalised first — boundary = the last watched
+   instant, else "now" — so the auto-open always has one. If that boundary has already
+   elapsed, the quota is rolled over and no gate is armed. The check runs **once per process**
+   (`sRestoreChecked`): only the first resume after a process start may invent a gate, later
+   resumes merely re-apply an existing one. Without that, a mid-clip resume at bedtime with
+   "Stop immediately" OFF (a dialog, PIP, entering Settings) would re-arm the night gate and
+   cut a clip the parent allowed to finish.
 3. **Escape keys and the bring-back are gate-aware** (`KioskModeManager`).
    `isKeyGuardActive` is `KidsTimeUpLock.isLocked() || (kiosk on && no grace && no parent
    release)`, so where the accessibility guard is enabled the input filter kills HOME /
@@ -851,10 +859,11 @@ app's:
 > **Status (2026-11-19):** committed on `kids` as `48425e763`; CI run
 > [44512686648](https://github.com/mastternick/SmartTubeKids/actions/runs/44512686648) green
 > (artifact `SmartTubeKids_32.79-kids-95_*`; DEX carries `restoreIfDue`, `isKioskOrGateActive`,
-> `sPinLockoutUntilMs`, `getExhaustedAtMs`). Installed **in place** on the TV box (previous
-> `32.79-kids-89`): `versionName=32.79-kids-95`, `ACCESS_RESTRICTED_SETTINGS=allow`,
-> `KioskKeyGuardService` enabled **and bound**, no FATAL in logcat, and no gate armed on that
-> launch (the v1.12 pause had already elapsed). The lock itself was **not** exercised on the
+> `sPinLockoutUntilMs`). Installed **in place** on the TV box (previous
+> `32.56-kids-89`): `versionName=32.79-kids-95`, `ACCESS_RESTRICTED_SETTINGS=allow`,
+> `KioskKeyGuardService` enabled **and bound**, no FATAL in logcat, and a gate was
+> **not observed on that launch: the screen showed the browse grid with 27:37 left on the
+> badge, i.e. the quota was not exhausted**. The lock itself was **not** exercised on the
 > device — that needs a spent quota plus the parent PIN.
 
 ## Upstream sync (official SmartTube → kids)

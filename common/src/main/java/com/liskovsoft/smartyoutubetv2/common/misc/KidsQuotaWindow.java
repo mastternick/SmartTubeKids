@@ -56,16 +56,18 @@ public final class KidsQuotaWindow {
      * false "fresh quota" never appears. KidsModeController.anchorCooldownIfNeeded() writes a
      * proper pause anchor on the next check instead.
      *
-     * KIDS v1.12: the pause boundary no longer depends on the flag alone. {@code exhaustedAtMs}
-     * is the persisted instant the quota was crossed, so a blob left at "used >= limit,
-     * inCooldown = false" by a process death still knows when the pause really began: the
-     * boundary is the crossing, and time spent with the box off counts against the pause. A 0
-     * crossing (blob from an older build) keeps the old behaviour — known only once
+     * KIDS v1.12: the pause boundary no longer depends on the flag alone. {@code lastWatchMs}
+     * is the persisted instant of the last counted watch minute, so a blob left at "used >= limit,
+     * inCooldown = false" by a process death still knows when the child really stopped watching:
+     * the boundary is that last watched instant, and the idle time since counts against the pause.
+     * The crossing instant would be the wrong boundary — with "Stop immediately" OFF a clip can run
+     * for hours past the limit, and anchoring there would credit the overrun as pause. A 0 boundary
+     * (blob from an older build) keeps the old behaviour — known only once
      * anchorCooldownIfNeeded() writes the anchor.
      */
     public static boolean isWindowExpired(long storedWindowStartMs, long nowMs, int intervalMinutes,
                                           long usedMs, long limitMs, boolean inCooldown,
-                                          long exhaustedAtMs) {
+                                          long lastWatchMs) {
         if (limitMs <= 0 || storedWindowStartMs <= 0) {
             return true; // no quota / no anchor: nothing to wait for, start fresh
         }
@@ -74,10 +76,10 @@ public final class KidsQuotaWindow {
             return false; // quota not spent yet — no pause exists, never replenish
         }
 
-        long boundary = inCooldown ? storedWindowStartMs : exhaustedAtMs;
+        long boundary = inCooldown ? storedWindowStartMs : lastWatchMs;
 
         if (boundary <= 0) {
-            return false; // pause never anchored and its crossing unknown: nothing to expire
+            return false; // pause never anchored and no watch instant known: nothing to expire
         }
 
         return isPauseElapsed(boundary, nowMs, intervalMinutes);
