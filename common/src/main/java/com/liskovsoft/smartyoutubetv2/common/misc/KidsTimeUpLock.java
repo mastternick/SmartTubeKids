@@ -18,28 +18,37 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import java.lang.ref.WeakReference;
 
 /**
- * KIDS: PIN-locked black screen shown when the daily watch limit expires with
- * "stop immediately" (force stop) enabled — also, since v1.11, inside the bedtime
- * window even with that switch off ({@link #isBedtimeGateActive}).
+ * KIDS: the time-up gate — the PIN-locked screen shown when the watch limit expires with
+ * "stop immediately" (force stop) enabled — also, since v1.11, inside the bedtime window
+ * even with that switch off ({@link #isBedtimeGateActive}).
  *
- * Difference from the calm exit: there the black screen is only a transition — the
- * first key press removes it and the child is back on the playlist. Here the screen
- * is a GATE: every key press is swallowed and the screen stays pitch black, the
- * overlay survives the playback activity (re-applied on the resumed browse activity),
- * and only the correct Kids Mode PIN removes it.
+ * Difference from the calm exit: there the black screen is only a transition — the first
+ * key press removes it and the child is back on the playlist. Here the screen is a GATE:
+ * every key press is swallowed and the art stays (classic black, the Mile Marker car or the
+ * night scene), and the overlay survives the playback activity (re-applied on the resumed
+ * browse activity).
+ *
+ * What releases it (KIDS v1.15):
+ *  - the car / classic gate once the reset pause is over: ONE escape press (BACK, or
+ *    HOME/RECENTS through the guard) writes the fresh quota and drops the screen — no PIN,
+ *    the pause was already served. The gate no longer opens itself at the boundary: the car
+ *    stays parked at lamp 10 until that press.
+ *  - the night art: a clock lock — the 10-press mash + PIN, or the 06:00 boundary.
+ *  - the correct Kids Mode PIN at any other time (see the mash gate below).
  *
  * The PIN dialog is NOT shown before the child earned it: an escape key must be
  * pressed {@link KidsTimeUpKeyGate#REQUIRED_PRESSES} times, each within
  * {@link KidsTimeUpKeyGate#GAP_MAX_MS} of the previous press (see KidsTimeUpKeyGate). One stray BACK used to
- * pop the PIN prompt outright, which is exactly the thing the gate is meant to hide.
+ * pop the PIN prompt outright, which is exactly the thing the gate is meant to hide. The prompt
+ * itself is non-cancelable: BACK cannot hide it, only a PIN or the Cancel button closes it.
  *
- * The state is in-memory only (never persisted) on purpose: a locked screen must
- * never come back after an app restart — see the v1.2.0/v1.2.4 poisoned-prefs black
- * screen lesson in KidsMigration. A restart simply starts a fresh, unlocked app; the
- * daily counter itself stays persisted, so the next video attempt re-arms the lock.
+ * State: the in-memory {@code sLocked} is re-derived from the PERSISTED quota on the first resume
+ * of each process ({@link #restoreIfDue}, v1.13) — a restart must not hand the playlist back while
+ * the quota is spent, and since v1.15 an unreleased night gate survives it too. The overlay itself
+ * is never persisted; {@link #applyOnResume} re-hosts it. The counter stays persisted either way.
  *
  * NOTE: the lock is never armed without an enabled PIN — otherwise nobody, not even
- * the parent, could get past the black screen.
+ * the parent, could get past the screen.
  */
 public class KidsTimeUpLock {
     private static final String TAG = KidsTimeUpLock.class.getSimpleName();

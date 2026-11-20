@@ -923,9 +923,11 @@ survives a process restart: `restoreIfDue` reads the persisted pause tuple — `
 `used >= limit`, and the pause anchor (`windowStartMs`) **inside the night window** — as `nightHeld`.
 The anchor scoping is load-bearing: the same tuple also describes a daytime pause, and adopting it
 there would hand a restarting child a full fresh quota (the new "morning already passed" wipe would
-fire on a 15:00 anchor) and would arm the cat at 23:00 for an exhaustion from the afternoon. A held
-night gate whose clock already passed 06:00 — the release never ran because the box was off — is
-replenished and dropped instead of being shown for a moment on that launch.
+fire on a 15:00 anchor) and would arm the cat at 23:00 for an exhaustion from the afternoon. Adopting
+the held gate still goes through the unchanged "gate is due anyway" test — **Stop immediately ON, or
+the clock still inside the night window** — so a parent who turned the hard stop off is not locked by
+a restart. A held night gate whose clock already passed 06:00 — the release never ran because the box
+was off — is replenished and dropped instead of being shown for a moment on that launch.
 
 **(c) The controller no longer rolls the window under a gate.**
 `KidsModeController.resetWindowIfNeeded()` returns at once while `KidsTimeUpLock.isLocked()`, so the
@@ -947,6 +949,18 @@ presenter's `applyBrightness` persists first and then applies to a real activity
 when it is an activity, otherwise `MotherActivity.getResumedActivity()` — because the application
 context has no window and the old code was a silent no-op. `KidsScreenHelper.setBrightness` had no
 callers left and was deleted.
+
+> **Status (2026-11-20):** commit `7c8a7afd3` on `kids`, on top of the upstream-32.80 merge
+> `7187a6f3c`; CI "Build Debug APK" run
+> [44780556550](https://github.com/mastternick/SmartTubeKids/actions/runs/44780556550) green →
+> build `32.80-kids-102` (lint + build). DEX proof on
+> `SmartTubeKids_32.80-kids-102_universal.apk`: `scheduleMorningCheck`, `onMorningCheck`,
+> `msUntilMorning`, `showPasswordSticky`, `dismissGatePrompt` present; `onOpenGate`,
+> `GATE_OPEN_CELEBRATION_MS`, `sOpenGateTask`, `sOpenGatePending` absent. Installed in place on the
+> box (`adb install -r`, previous `32.79-kids-99`) as `versionName=32.80-kids-102`;
+> `ACCESS_RESTRICTED_SETTINGS=allow`, `KioskKeyGuardService` enabled **and bound**, no FATAL in
+> logcat. **Device smoke of the new rules still PENDING** — the box is asleep in the night gate and
+> the parent opens it for the smoke.
 
 ### Smoke checklist (needs the parental PIN)
 
