@@ -21,6 +21,7 @@ import com.liskovsoft.smartyoutubetv2.common.misc.KidsTimeUpLock; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.KioskModeManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.misc.MileMarkerOverlay; // KIDS v1.9
+import com.liskovsoft.smartyoutubetv2.common.misc.MotherActivity; // KIDS v1.15
 import com.liskovsoft.smartyoutubetv2.common.prefs.GeneralData; // KIDS
 import com.liskovsoft.smartyoutubetv2.common.prefs.KidsModeData;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
@@ -116,12 +117,15 @@ public class KidsModeSettingsPresenter extends BasePresenter<Void> {
     }
 
     private void applyBrightness(int percent) {
-        // KIDS: getContext() returns the current Activity when one is available
-        android.content.Context context = getContext();
+        // KIDS v1.15: persist first, then apply to a REAL activity. The presenter context can be the
+        // application context (no window), which used to make this a silent no-op: the radio moved
+        // and the screen never dimmed.
+        mKidsData.setBrightnessPercent(percent);
 
-        if (context instanceof Activity) {
-            KidsScreenHelper.setBrightness((Activity) context, percent);
-        }
+        Context context = getContext();
+        Activity activity = context instanceof Activity ? (Activity) context : MotherActivity.getResumedActivity();
+
+        KidsScreenHelper.applyBrightness(activity);
     }
 
     /**

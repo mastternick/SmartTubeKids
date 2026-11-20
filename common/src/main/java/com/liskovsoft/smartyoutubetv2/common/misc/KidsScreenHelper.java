@@ -79,14 +79,6 @@ public class KidsScreenHelper {
         activity.getWindow().setAttributes(lp);
     }
 
-    /**
-     * Store a new brightness percent (10..100 or AUTO) and apply it immediately.
-     */
-    public static void setBrightness(Activity activity, int percent) {
-        KidsModeData.instance(activity).setBrightnessPercent(percent);
-        applyBrightness(activity);
-    }
-
     // --- Fade to black (Calm Exit transition) ---
 
     /**

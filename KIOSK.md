@@ -262,6 +262,9 @@ countdown reaches `0:00`, the car arrives at lamp 10, the "Reset complete!" swee
 and the overlay releases the lock; during that 3 s celebration any key press that reaches the
 app opens it immediately (the exact key rule is below).
 
+> **Superseded by v1.15:** the car no longer opens by itself at the reset boundary — it stays
+> parked at lamp 10 until the child presses an escape key (see the v1.15 section).
+
 **KIDS v1.9.8 visuals: the scene IS the destination countdown.** Pure black AMOLED
 background (`canvas.drawColor(Color.BLACK)`; the sky gradient is gone), so the road, its
 edge stripes and the car stay the only lit elements. Lamps are brighter on black
@@ -289,6 +292,9 @@ because the window is re-anchored at that instant the next clip is not insta-loc
 `scheduleRolloverCheck`, which must not restart the 3 s countdown) and is cleared in
 `release()` / `releaseStateOnly()` together with the task.
 Lock-at-end mode is deliberately excluded: it still requires the PIN.
+
+> **Superseded by v1.15:** the one-shot no longer opens the gate; the car/classic screen waits for
+> an escape key and the night art for 06:00 (see the v1.15 section).
 
 KIDS v1.9.5 replaced the clock-aligned grid with **cooldown-from-exhaustion** semantics, and KIDS v1.9.7
 made the reset interval a **pause that only starts when the watch limit is reached** — it is not a rolling
@@ -411,6 +417,9 @@ been used up and the configured interval has elapsed), the gate opens by itself 
 kiosk mode** — 3 s after the boundary so the Mile Marker car is seen reaching lamp 10 — and the
 fresh quota is written first, so the next clip is not insta-locked.
 
+> **Superseded by v1.15:** nothing opens at the boundary any more. The fresh quota is written only
+> when an escape key releases the car/classic gate; the night art leaves at 06:00.
+
 **KIDS v1.9.8: one key press opens it once the pause is over.** `onKeyPress` (every key the
 activity sees — `MotherActivity.dispatchKeyEvent` feeds them all while locked) and
 `onGuardEscapeKey(context, event)` (the keys the guard swallows, filtered by
@@ -485,6 +494,9 @@ inside the quota gate, so with **Stop immediately** off there was no gate at all
 scene. **Superseded by v1.11.0** (next section): the night gate now arms from the time-up decisions
 themselves and holds with that switch off. The no-PIN case still self-releases on the first key press.
 
+> **Superseded by v1.15:** the night art is a clock lock — no automatic release at the reset
+> boundary, only the mash + PIN or the 06:00 boundary.
+
 Load-bearing details:
 
 - **The wrap is the whole point.** The test must be true at 00:30 for a 21:00 bedtime. A naive
@@ -549,6 +561,9 @@ overlay with `KidsScreenHelper.showBlackScreenKeepBrightness`, which leaves the 
 brightness alone — a key-press re-cover (or a guard-swallowed HOME) cannot dim the panel under the
 prompt. Dismissal re-covers into the switched-off state.
 
+> **Superseded by v1.15:** the night art no longer re-opens at the reset boundary — it is a clock
+> lock, released only by the mash + PIN or at 06:00.
+
 **Lock at end gets the art too.** `lockScreenAtVideoEnd()` calls
 `KidsTimeUpLock.armNightArt(activity)` when `isBedtimeLockDue()`, else the classic `arm(activity)`.
 Art only: `sQuotaGate`/`sBedtimeLock` stay false, so the lock keeps its v1.7.5 semantics — the reset
@@ -579,6 +594,9 @@ Kids Mode or the PIN switched off), not on a quota check — the helper delibera
 `isQuotaExhausted` term, exactly like `isForceStopActive`: a rolled-over window reached through an
 unhandled key press must still go through the `sQuotaGate && isResetWindowDone` branch that writes the
 fresh quota, otherwise the child would land on a screen that re-locks on the next play attempt.
+
+> **Superseded by v1.15:** the reset boundary is no longer a release path of its own; it merely
+> permits the escape-key release (and the night art's 06:00 boundary).
 
 > **Status:** committed on branch `kids` as `26f04b7b` (v1.11.0) and `aaaccc95` (v1.11.1, the
 > Lock-at-end art); CI runs
@@ -796,6 +814,8 @@ closing a way the gate could be lost:
    resumes merely re-apply an existing one. Without that, a mid-clip resume at bedtime with
    "Stop immediately" OFF (a dialog, PIP, entering Settings) would re-arm the night gate and
    cut a clip the parent allowed to finish.
+   **Superseded by v1.15:** the restored car waits for an escape press instead of opening at the
+   end of the pause, and the restored night art survives an elapsed pause until 06:00.
 3. **Escape keys and the bring-back are gate-aware** (`KioskModeManager`).
    `isKeyGuardActive` is `KidsTimeUpLock.isLocked() || (kiosk on && no grace && no parent
    release)`, so where the accessibility guard is enabled the input filter kills HOME /
@@ -828,6 +848,8 @@ The hard lock can only ever be released by something the parent controls or by t
   either in Settings is never locked out by a leftover overlay.
 - **The reset boundary always opens the gate** — no mash, no PIN, kiosk or not
   (`openResetGate`, and the first key press after the boundary).
+  **Superseded by v1.15:** the boundary alone opens nothing; for the car and the classic screen the
+  first escape press after it releases without a PIN, and the night art leaves at 06:00.
 - **The correct PIN always releases** — and grants the usual 10-minute gate session. That
   authorization is in-memory only, so a process death drops it and the restored gate arms
   again (the parent simply types the PIN once more); what survives a restart is the persisted
@@ -868,6 +890,88 @@ app's:
 > grid with 27:37 left on the badge, i.e. the quota was not exhausted, so `restoreIfDue` returned at
 > `isQuotaExhausted`. The lock itself was **not** exercised on the device — that needs a spent quota
 > plus the parent PIN.
+
+## v1.15: the gate stays, the child leaves (KIDS v1.15)
+
+**The complaint.** At the end of the reset pause the car opened the playlist by itself. The owner
+wants the opposite: the screen is a wall, and the child is the one who leaves it. The car at lamp 10
+must stay parked; BACK then exits without a PIN, because the pause has already been served. The cat
+(night art) is a clock lock and never opens on a key press without the PIN.
+
+**(a) The car no longer auto-opens.** `GATE_OPEN_CELEBRATION_MS`, `sOpenGateTask`,
+`sOpenGatePending` and `onOpenGate()` are gone. The rollover one-shot is now informational: at the
+boundary `onRolloverCheck()` logs
+`"Reset pause over: gate keeps the art until an escape press (scene=%s)"` and returns — it opens
+nothing and writes no quota. `scheduleRolloverCheck()` also returns early when the pause has already
+elapsed, so a resume does not re-post a pointless timer. The fresh quota is written only by
+`openResetGate()`, i.e. when an escape key actually releases the car or the classic black gate
+(`onKeyPress` / `onGuardEscapeKey`). Before arrival the PIN is still earned the v1.13 way: ten quick
+escape presses, each within 2 s.
+
+**(b) The night art is a clock lock.** At the reset boundary the cat is untouched: `onKeyPress`'s
+arrival branch is skipped for `SCENE_NIGHT` and `onGuardEscapeKey` falls through to the mash counter,
+so only the mash + PIN releases it early. In the morning `scheduleMorningCheck()` arms a one-shot for
+`KidsBedtime.msUntilMorning(now)` — the next 06:00 — and `onMorningCheck()` releases the gate right
+after replenishing the window (`resetWindow(now)`), otherwise the first morning clip would re-lock.
+A box that is **asleep** at 06:00 has no resumed activity (`MotherActivity.onPause` cleared it):
+releasing there would leave the cat/black view attached with no lock behind it, so the check retries
+every 60 s (`MORNING_RETRY_MS`) and, if the wake-up happens after 06:00, the resume path re-arms it
+with a 1 s delay (`scheduleMorningCheck` sees a non-night clock) instead of waiting for tomorrow.
+The one-shot is re-armed by `armQuotaGate` (night scene), by `applyOnResume` and by itself when the
+clock is pushed back into the window, and is dropped in `release()` / `releaseStateOnly()`. It also
+survives a process restart: `restoreIfDue` reads the persisted pause tuple — `inCooldown` set,
+`used >= limit`, and the pause anchor (`windowStartMs`) **inside the night window** — as `nightHeld`.
+The anchor scoping is load-bearing: the same tuple also describes a daytime pause, and adopting it
+there would hand a restarting child a full fresh quota (the new "morning already passed" wipe would
+fire on a 15:00 anchor) and would arm the cat at 23:00 for an exhaustion from the afternoon. A held
+night gate whose clock already passed 06:00 — the release never ran because the box was off — is
+replenished and dropped instead of being shown for a moment on that launch.
+
+**(c) The controller no longer rolls the window under a gate.**
+`KidsModeController.resetWindowIfNeeded()` returns at once while `KidsTimeUpLock.isLocked()`, so the
+~60 s `onTickle` cannot drop the overlay by rewinding the quota behind it. The gate owns the boundary
+now; the release paths write the fresh window themselves.
+
+**(d) The PIN prompt is non-cancelable.** `SimpleEditDialog.showPasswordSticky(...)` is the gate's
+variant: `setCancelable(false)` + `setCanceledOnTouchOutside(false)`, so BACK cannot dismiss the
+prompt (the child cannot hide it and re-mash for free); Cancel still works and re-covers the screen.
+Every settings prompt keeps the old dismissible behavior. Because BACK can no longer clear it, every
+gate release dismisses the prompt explicitly (`dismissGatePrompt`, called by `release` and
+`releaseStateOnly`): a non-cancelable prompt must never float over the playlist it was gating —
+e.g. when the morning boundary releases the gate at 06:00 with a prompt open.
+
+**(e) Brightness applies everywhere.** `MotherActivity.onResume` calls
+`KidsScreenHelper.applyBrightness(this)` right after `applyFullscreenModeIfNeeded()` and before
+`KidsTimeUpLock.applyOnResume` (the night scene's screen-off state must win afterwards). The
+presenter's `applyBrightness` persists first and then applies to a real activity — its own context
+when it is an activity, otherwise `MotherActivity.getResumedActivity()` — because the application
+context has no window and the old code was a silent no-op. `KidsScreenHelper.setBrightness` had no
+callers left and was deleted.
+
+### Smoke checklist (needs the parental PIN)
+
+- Car arrival: quota spent, pause ends while the car sits at lamp 10 — the screen **stays** on the
+  car, the playlist never appears.
+- BACK without a PIN: one BACK after the boundary releases the car/classic gate, and the next clip
+  plays with the fresh quota.
+- Mash before arrival: ten quick escape presses inside the pause show the PIN dialog; a wrong PIN
+  keeps it; BACK on the prompt does **not** dismiss it.
+- Cat mash + PIN: with the night art the boundary changes nothing; only the mash + PIN (or 06:00)
+  releases it.
+- Morning auto-exit: leave the cat on screen past 06:00 — it opens by itself and the quota is fresh.
+- Restart under the cat: kill the app at 02:00, reopen — the cat is back (no playlist), and 06:00
+  still releases it.
+- Restart during a **daytime** pause: spend the quota at 15:00 with a 60 min interval, restart the
+  app at 15:10 — the gate/pause must still be there (no full fresh quota), and the cat must **not**
+  appear at 23:00 for that afternoon exhaustion.
+- Prompt over a release: open the PIN prompt (mash) and let the morning boundary pass — the prompt
+  must disappear with the gate, not float over the playlist with a dead BACK.
+
+**Known residual (accepted, pre-existing class):** a pause anchored *inside* the night window whose
+interval already elapsed, followed by a process restart while the clock is still night, restores the
+cat for a window that is objectively fresh (the persisted tuple cannot tell "the night gate was up"
+from "the pause was anchored at night"). Fixing that needs a persisted scene flag; the morning
+boundary still releases it.
 
 ## Upstream sync (official SmartTube → kids)
 

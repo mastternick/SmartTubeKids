@@ -10,8 +10,9 @@ import java.util.Locale;
  * Pure java.util on purpose, like KidsQuotaWindow: the window logic is provable on a plain JVM
  * (javac/java, no SDK, no gradle — see BUILD-POLICY.md).
  *
- * The window crosses midnight and has NO wake-up hour and no effect on the gate itself: the
- * reset pause still opens the screen by itself, whatever the clock says.
+ * The window crosses midnight. KIDS v1.15: its end ({@link #NIGHT_END_MINUTES}) is now a real
+ * boundary — the night gate is a clock lock that releases itself in the morning
+ * ({@code KidsTimeUpLock.onMorningCheck}), whatever the reset pause says.
  */
 public final class KidsBedtime {
     public static final int OFF = -1;
@@ -66,6 +67,22 @@ public final class KidsBedtime {
 
     public static String formatHour(int minutes) {
         return String.format(Locale.US, "%02d:00", minutes / 60);
+    }
+
+    /** Milliseconds until the next {@link #NIGHT_END_MINUTES} boundary (>= 1). */
+    public static long msUntilMorning(long nowMs) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(nowMs);
+        calendar.set(Calendar.HOUR_OF_DAY, NIGHT_END_MINUTES / 60);
+        calendar.set(Calendar.MINUTE, NIGHT_END_MINUTES % 60);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+
+        while (calendar.getTimeInMillis() <= nowMs) {
+            calendar.add(Calendar.DAY_OF_YEAR, 1);
+        }
+
+        return calendar.getTimeInMillis() - nowMs;
     }
 
     public static int sanitize(int raw) {

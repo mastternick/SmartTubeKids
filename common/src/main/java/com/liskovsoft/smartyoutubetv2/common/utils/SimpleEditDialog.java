@@ -47,7 +47,16 @@ public class SimpleEditDialog {
         return show(context, dialogTitle, dialogTitle, defaultValue, onChange, onDismiss, true);
     }
 
+    // KIDS v1.15: gate PIN prompt — BACK must not dismiss it, only the correct PIN (or Cancel) does.
+    public static AlertDialog showPasswordSticky(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss) {
+        return show(context, dialogTitle, dialogHint, defaultValue, onChange, onDismiss, true, false);
+    }
+
     private static AlertDialog show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss, boolean isPassword) {
+        return show(context, dialogTitle, dialogHint, defaultValue, onChange, onDismiss, isPassword, true);
+    }
+
+    private static AlertDialog show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss, boolean isPassword, boolean cancelable) {
         AlertDialog.Builder builder = new AlertDialog.Builder(context, R.style.AppDialog);
         LayoutInflater inflater = LayoutInflater.from(context);
         View contentView = inflater.inflate(R.layout.simple_edit_dialog, null);
@@ -77,6 +86,11 @@ public class SimpleEditDialog {
 
         if (onDismiss != null) {
             configDialog.setOnDismissListener(dialog -> onDismiss.run());
+        }
+
+        if (!cancelable) {
+            configDialog.setCancelable(false);
+            configDialog.setCanceledOnTouchOutside(false);
         }
 
         editField.setOnEditorActionListener((v, actionId, event) -> {

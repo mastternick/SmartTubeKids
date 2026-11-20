@@ -270,8 +270,13 @@ public class MotherActivity extends FragmentActivity {
 
         applyFullscreenModeIfNeeded();
 
+        // KIDS v1.15: the parent-chosen screen brightness applies to EVERY screen, not only to the
+        // player on video load — and it must run BEFORE KidsTimeUpLock.applyOnResume below, whose
+        // night-scene screen-off state owns the window brightness afterwards.
+        KidsScreenHelper.applyBrightness(this);
+
         // KIDS v1.2.4: startup hooks REMOVED (root cause of black screen since v1.2.0).
-        // Brightness is applied only inside the player (KidsModeController.onVideoLoaded).
+        // Brightness is applied on every resume (v1.15); the player call stays as a re-apply.
         // On the first launch after the v1.2.4 migration, force-dismiss any LIVE system
         // screensaver / stuck dim state (clearing prefs alone can't dismiss an
         // already-active screensaver session).

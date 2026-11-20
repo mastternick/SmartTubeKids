@@ -84,19 +84,18 @@ public class KidsTimeUpLock {
     private static final long PIN_LOCKOUT_MS = 5 * 60_000L;
     private static int sWrongPinAttempts;
     private static long sPinLockoutUntilMs;
-    // KIDS v1.9.4: the quota gate opens itself at the end of the reset window (no PIN).
+    // KIDS v1.9.4: the quota gate is released at the end of the reset window (no PIN).
     // One-shot task + the context it was scheduled with. sQuotaGate distinguishes the
     // quota gate (rollover applies) from Lock-at-end (it does not).
     private static final Runnable sRolloverTask = KidsTimeUpLock::onRolloverCheck;
     private static WeakReference<Context> sRolloverContext;
     private static boolean sQuotaGate;
-    // KIDS v1.9.8: the reset pause is over — this long celebration first (the car is seen
-    // reaching lamp 10 and "Reset complete!" shows), then the gate opens by itself.
-    private static final long GATE_OPEN_CELEBRATION_MS = 3_000L;
-    private static final Runnable sOpenGateTask = KidsTimeUpLock::onOpenGate;
-    // The celebration is posted once per gate: a resume re-runs scheduleRolloverCheck, and
-    // re-posting there would restart the 3 s countdown forever.
-    private static boolean sOpenGatePending;
+    // KIDS v1.15: the night art is a clock lock now — it never opens at the reset boundary, only by
+    // the mash + PIN or by the 06:00 boundary. One-shot, re-armed on every resume.
+    private static final long MORNING_MIN_MS = 1_000L;
+    private static final long MORNING_RETRY_MS = 60_000L; // the TV was asleep at the boundary
+    private static final Runnable sMorningTask = KidsTimeUpLock::onMorningCheck;
+    private static WeakReference<Context> sNightContext;
     // KIDS v1.13: the persisted quota is inspected exactly once per PROCESS. onResume runs for
     // every activity (the playback one included), and at bedtime with force stop OFF a mid-clip
     // resume (dialog, PIP, settings) would otherwise re-arm the night gate and cut a clip the
@@ -156,6 +155,21 @@ public class KidsTimeUpLock {
     }
 
     /**
+     * KIDS v1.15: close the gate's PIN prompt. It is non-cancelable (BACK must not dismiss it), so
+     * every gate release has to dismiss it explicitly — otherwise it would float over the playlist
+     * with a dead BACK. Safe when no prompt ever showed (BadTokenException path leaves null).
+     */
+    private static void dismissGatePrompt() {
+        AlertDialog dialog = sPinDialog != null ? sPinDialog.get() : null;
+
+        if (dialog != null) {
+            dialog.dismiss();
+        }
+
+        sPinDialog = null;
+    }
+
+    /**
      * @return true when force stop is armed: Kids Mode on, the "stop immediately"
      *         switch on, a PIN available to unlock the screen with, AND the hard stop is not
      *         suspended by a time-up gate unlock.
@@ -203,13 +217,13 @@ public class KidsTimeUpLock {
      *
      * Deliberately NO quota predicate here: the gate must behave exactly like the hard-stop gate
      * and `isForceStopActive` does not consult the quota either. Every release path clears
-     * `sBedtimeLock` (PIN unlock, the automatic open at the reset boundary, per-step
-     * `openResetGate`, a parent bonus via `releaseStateOnly`, Kids Mode or PIN switched off), and a
-     * quota rollover that lands on an unhandled key press still goes through the
-     * `sQuotaGate && isResetWindowDone(activity)` branch of `onKeyPress`/`onGuardEscapeKey`. A quota
-     * predicate would instead release the gate on the first key press of a rolled-over window
-     * WITHOUT writing the fresh quota, so the child would land on a screen that re-locks on the
-     * next play attempt.
+     * `sBedtimeLock` (PIN unlock, per-step `openResetGate`, the v1.15 morning boundary, a parent
+     * bonus via `releaseStateOnly`, Kids Mode or PIN switched off), and after the reset pause the
+     * car/classic gate goes through the `sQuotaGate && isResetWindowDone(activity)` branch of
+     * `onKeyPress`/`onGuardEscapeKey`, which now requires an escape press (the night art never
+     * takes it). A quota predicate would instead release the gate on the first key press of a
+     * rolled-over window WITHOUT writing the fresh quota, so the child would land on a screen that
+     * re-locks on the next play attempt.
      */
     private static boolean isBedtimeGateActive(Context context) {
         return sBedtimeLock
@@ -340,6 +354,10 @@ public class KidsTimeUpLock {
             scheduleRolloverCheck(activity);
         }
 
+        if (scene == SCENE_NIGHT && activity != null) {
+            scheduleMorningCheck(activity);
+        }
+
         Log.d(TAG, "Time-up lock armed (scene=%s)", scene);
     }
 
@@ -381,8 +399,14 @@ public class KidsTimeUpLock {
      *
      * The art is chosen exactly like the controller's force-stop session: bedtime →
      * night scene, otherwise the mile marker if the parent picked it. {@link #armQuotaGate}
-     * schedules the rollover one-shot, whose boundary is the persisted {@code windowStartMs},
-     * so the restored gate still opens by itself at the end of the pause.
+     * schedules the rollover one-shot, whose boundary is the persisted {@code windowStartMs}
+     * (KIDS v1.15: the car then stays parked at lamp 10 until an escape press; the night art
+     * additionally survives an elapsed pause and is released at the 06:00 boundary).
+     *
+     * KIDS v1.15: an unreleased night gate outlives the pause. Its raw persisted tuple
+     * ({@code inCooldown} set, {@code used >= limit}) is the lock — a normal release writes
+     * {@link KidsModeData#resetWindow(long)}, clearing both — so a restart at 02:00, hours after
+     * the reset boundary, still restores the cat instead of handing over the playlist.
      *
      * KIDS v1.13: the check runs ONCE PER PROCESS ({@link #sRestoreChecked}). The first resume
      * after a process start is the only one that may invent a gate; later resumes only re-apply
@@ -416,11 +440,22 @@ public class KidsTimeUpLock {
             return; // no watch limit: nothing to re-arm
         }
 
-        if (!isQuotaExhausted(context)) {
+        // KIDS v1.15: the night art is released only by the mash + PIN or the morning boundary, so an
+        // unreleased gate must survive a restart. Its persisted shape is `inCooldown` + `used >= limit`,
+        // but that is ALSO the shape of a daytime pause, so the pause anchor must fall inside the night
+        // window (`anchorCooldown` stores the stop/exhaustion instant in `windowStartMs`). A normal
+        // release writes resetWindow, clearing both fields.
+        boolean nightHeld = data.getWindowStartMs() > 0
+                && data.isInCooldown()
+                && data.getUsedMs() >= KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs())
+                && KidsBedtime.isNight(data.getBedtimeMinutes(),
+                        KidsBedtime.minutesOfDay(data.getWindowStartMs()));
+
+        if (!isQuotaExhausted(context) && !nightHeld) {
             return; // time left in the window
         }
 
-        if (isResetWindowDone(context)) {
+        if (isResetWindowDone(context) && !nightHeld) {
             return; // the pause is over — the controller rolls the window over
         }
 
@@ -430,19 +465,28 @@ public class KidsTimeUpLock {
         boolean bedtime = KidsBedtime.isNight(data.getBedtimeMinutes(),
                 KidsBedtime.minutesOfDay(System.currentTimeMillis()));
 
+        // KIDS v1.15: a held night gate is over once the clock is past 06:00 — the morning release
+        // simply never ran because the box was off. Replenish and stay out instead of flashing the
+        // cat for a moment on this launch.
+        if (nightHeld && !bedtime) {
+            data.resetWindow(System.currentTimeMillis());
+            Log.d(TAG, "Night gate not restored: the morning boundary already passed");
+            return;
+        }
+
         if (!isForceStopActive(context) && !bedtime) {
             return; // the calm exit must never invent a gate
         }
 
-        // KIDS v1.13: scheduling the auto-open needs a real pause boundary.
+        // KIDS v1.13: the reset boundary needs a real pause anchor.
         // scheduleRolloverCheck() bails out unless used >= limit AND inCooldown, and a cold
         // browse-only launch has no controller tick to write that flag yet (the controllers are
         // built from PlaybackPresenter.onViewInitialized, not from instance()). The persisted
         // boundary is the LAST WATCHED instant (v1.12) — never the moment the quota was crossed,
         // which with "stop immediately" OFF can be hours earlier and would credit the overrun as
         // pause. A legacy blob carries none, and the only honest boundary there is "now" — same
-        // as the controller's own fallback, and it still gives the gate its automatic opening one
-        // interval later. Without this the restored gate would have NO automatic opening at all.
+        // as the controller's own fallback. KIDS v1.15: the boundary no longer opens anything by
+        // itself, but without the flag the gate would read as "no pause ever started".
         if (!data.isInCooldown()) {
             long now = System.currentTimeMillis();
             long lastWatchMs = data.getLastWatchMs();
@@ -458,7 +502,7 @@ public class KidsTimeUpLock {
             Log.d(TAG, "Time-up gate: pause boundary normalised (boundary=%s, lastWatch=%s)", boundary, lastWatchMs);
         }
 
-        if (bedtime) {
+        if (bedtime) { // nightHeld without bedtime already returned above
             armQuotaGate(activity, SCENE_NIGHT);
         } else {
             armQuotaGate(activity, data.isUseMileMarker() ? SCENE_MILE_MARKER : SCENE_PLAIN);
@@ -486,6 +530,10 @@ public class KidsTimeUpLock {
         // first schedule. scheduleRolloverCheck removes any previous posting, no stacking.
         if (sQuotaGate) {
             scheduleRolloverCheck(activity);
+        }
+
+        if (sQuotaGate && sScene == SCENE_NIGHT) {
+            scheduleMorningCheck(activity);
         }
 
         // The art chosen at arm time, re-hosted on the new activity (every show is idempotent
@@ -528,20 +576,24 @@ public class KidsTimeUpLock {
         // Re-cover first: a dialog, a transition or a resumed activity may have dropped it
         cover(activity);
 
+        // KIDS v1.15: the reset pause is over. The car stays parked at lamp 10 and the classic black
+        // gate stays black until the child presses an escape key — then it opens with no PIN. The NIGHT
+        // art is exempt: it keeps the mash+PIN and is released by the morning boundary.
+        if (sQuotaGate && isResetWindowDone(activity)) {
+            if (sScene != SCENE_NIGHT) {
+                if (isEscapePress(event)) {
+                    openResetGate(activity, activity);
+                }
+                return;
+            }
+        }
+
         final KidsModeData data = KidsModeData.instance(activity);
 
         // Release without asking when the gate no longer applies — Kids Mode, force stop, the
         // end-of-video mode or the PIN was turned off meanwhile. Never trap anybody.
         if (!isGateActive(activity)) {
             release(activity);
-            return;
-        }
-
-        // KIDS v1.9.8: the reset pause has run out — ONE key press opens the gate on the spot.
-        // No mash, no PIN, kiosk included: after a reset nobody may be told to press ten times
-        // or to type a PIN. The one-shot below normally already got there by itself.
-        if (sQuotaGate && isResetWindowDone(activity)) {
-            openResetGate(activity, activity);
             return;
         }
 
@@ -618,7 +670,7 @@ public class KidsTimeUpLock {
         // the PIN on a panel that is still dark. A cancel re-covers and dims it again (cover()).
         KidsScreenHelper.applyBrightness(activity);
 
-        AlertDialog pinDialog = SimpleEditDialog.showPassword(
+        AlertDialog pinDialog = SimpleEditDialog.showPasswordSticky(
                 activity,
                 activity.getString(R.string.kids_enter_pin),
                 activity.getString(R.string.kids_time_up_pin_hint),
@@ -703,9 +755,10 @@ public class KidsTimeUpLock {
             return;
         }
 
-        // KIDS v1.9.8: with kiosk on, HOME/RECENTS die in the guard — after a reset the first
-        // one must open the gate exactly like BACK does, instead of counting towards the mash.
-        if (sQuotaGate && isResetWindowDone(context)) {
+        // KIDS v1.15: with kiosk on, HOME/RECENTS die in the guard — once the reset pause is over,
+        // one of them releases the car/classic gate with no PIN. The night art is a clock lock: it
+        // falls through to the mash counter and only the 06:00 boundary (or the PIN) opens it.
+        if (sQuotaGate && sScene != SCENE_NIGHT && isResetWindowDone(context)) {
             openResetGate(context, MotherActivity.getResumedActivity());
             return;
         }
@@ -739,6 +792,8 @@ public class KidsTimeUpLock {
      */
     public static void release(Activity activity) {
         sLocked = false;
+        // KIDS v1.15: the gate prompt is non-cancelable — it must never outlive its gate.
+        dismissGatePrompt();
         sPinDialogShownAtMs = 0;
         sWrongPinAttempts = 0;
         sPinLockoutUntilMs = 0;
@@ -746,11 +801,10 @@ public class KidsTimeUpLock {
         sNightStartMs = 0;
         sQuotaGate = false;
         sBedtimeLock = false;
-        sPinDialog = null;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
-        Utils.removeCallbacks(sOpenGateTask);
-        sOpenGatePending = false;
+        Utils.removeCallbacks(sMorningTask);
+        sNightContext = null;
         KidsTimeUpKeyGate.resetSequence();
 
         if (activity != null) {
@@ -769,6 +823,8 @@ public class KidsTimeUpLock {
      */
     public static void releaseStateOnly() {
         sLocked = false;
+        // KIDS v1.15: the gate prompt is non-cancelable — it must never outlive its gate.
+        dismissGatePrompt();
         sPinDialogShownAtMs = 0;
         sWrongPinAttempts = 0;
         sPinLockoutUntilMs = 0;
@@ -776,11 +832,10 @@ public class KidsTimeUpLock {
         sNightStartMs = 0;
         sQuotaGate = false;
         sBedtimeLock = false;
-        sPinDialog = null;
         sRolloverContext = null;
         Utils.removeCallbacks(sRolloverTask);
-        Utils.removeCallbacks(sOpenGateTask);
-        sOpenGatePending = false;
+        Utils.removeCallbacks(sMorningTask);
+        sNightContext = null;
         invalidateGateAuthorization();
         KidsTimeUpKeyGate.resetSequence();
 
@@ -822,48 +877,91 @@ public class KidsTimeUpLock {
     }
 
     /**
-     * KIDS v1.9.8: write the fresh quota and drop the gate — no mash, no PIN, kiosk included.
-     * Once the reset has happened the screen opens by itself; the child is never told to press
-     * ten times or to type a PIN after a reset.
+     * KIDS v1.9.8 / v1.15: write the fresh quota and drop the gate — no mash, no PIN, kiosk
+     * included. Since v1.15 this is the ESCAPE release of the car and classic gates (the night
+     * art never uses it: it leaves by the mash + PIN or the 06:00 boundary), so the gate stays
+     * on screen until the child actually presses a key.
      */
     private static void openResetGate(Context context, Activity host) {
-        if (context == null) {
-            return; // fail closed: never release without writing the fresh quota
+        Activity target = host != null ? host : MotherActivity.getResumedActivity();
+
+        if (context == null || target == null) {
+            // KIDS v1.15: no window to detach the art from — stay locked. Releasing here would
+            // write the fresh quota and leave the car/black view attached with nothing owning it
+            // (the next real key press or resume re-covers and releases it then).
+            Log.d(TAG, "Reset gate release skipped: no host activity");
+            return;
         }
 
         KidsModeData.instance(context).resetWindow(System.currentTimeMillis());
 
         // Prefer the activity the caller already has: the static can be null (or stale) exactly
         // when the overlay has to be detached from a known host.
-        release(host != null ? host : MotherActivity.getResumedActivity());
+        release(target);
 
         Log.d(TAG, "Reset pause over: gate opened without mash/PIN");
     }
 
-    /** Delayed by {@link #GATE_OPEN_CELEBRATION_MS}: let the car reach lamp 10 first. */
-    private static void onOpenGate() {
-        sOpenGatePending = false;
-
-        if (!sLocked || !sQuotaGate) {
-            return; // released meanwhile
+    /**
+     * KIDS v1.15: (re)arm the 06:00 one-shot for the night art. removeCallbacks first, so the
+     * arm path and every resume cannot stack chains.
+     */
+    private static void scheduleMorningCheck(Context context) {
+        if (context == null) {
+            return;
         }
 
-        Context context = sRolloverContext != null ? sRolloverContext.get() : null;
+        sNightContext = new WeakReference<>(context.getApplicationContext());
+
+        long now = System.currentTimeMillis();
+        KidsModeData data = KidsModeData.instance(context);
+        // KIDS v1.15: a resume past 06:00 must release at once — msUntilMorning would point at
+        // tomorrow and the cat would sit on screen for a whole day.
+        boolean night = KidsBedtime.isNight(data.getBedtimeMinutes(), KidsBedtime.minutesOfDay(now));
+        long delayMs = night ? Math.max(MORNING_MIN_MS, KidsBedtime.msUntilMorning(now)) : MORNING_MIN_MS;
+
+        Utils.removeCallbacks(sMorningTask);
+        Utils.postDelayed(sMorningTask, delayMs);
+    }
+
+    /** KIDS v1.15: 06:00 — the good-night screen opens by itself in the morning. */
+    private static void onMorningCheck() {
+        if (!sLocked || !sQuotaGate || sScene != SCENE_NIGHT) {
+            return;
+        }
+
+        Context context = sNightContext != null ? sNightContext.get() : null;
 
         if (context == null) {
-            // Context gone: nothing could write the fresh quota. Stay locked — the first key
-            // press still opens the gate through its own activity.
+            Activity resumed = MotherActivity.getResumedActivity();
+            if (resumed != null) {
+                scheduleMorningCheck(resumed);
+            }
             return;
         }
 
-        if (!isResetWindowDone(context)) {
-            // The boundary moved (backwards clock correction): wait for the real one, exactly
-            // like onRolloverCheck — otherwise this gate would lose its automatic open.
-            scheduleRolloverCheck(context);
+        KidsModeData data = KidsModeData.instance(context);
+
+        if (KidsBedtime.isNight(data.getBedtimeMinutes(), KidsBedtime.minutesOfDay(System.currentTimeMillis()))) {
+            scheduleMorningCheck(context); // the clock moved back into the window
             return;
         }
 
-        openResetGate(context, null);
+        Activity host = MotherActivity.getResumedActivity();
+
+        if (host == null) {
+            // KIDS v1.15: the TV is asleep at 06:00 (onPause cleared the resumed activity).
+            // Releasing now would write the fresh window and leave the cat/black view attached
+            // with no lock behind it — retry; a resume re-schedules this within a second.
+            Utils.postDelayed(sMorningTask, MORNING_RETRY_MS);
+            return;
+        }
+
+        // A new day: the window is replenished, otherwise the first morning clip would re-lock.
+        data.resetWindow(System.currentTimeMillis());
+        release(host);
+
+        Log.d(TAG, "Night gate released at the morning boundary");
     }
 
     /**
@@ -872,10 +970,11 @@ public class KidsTimeUpLock {
      *
      * KIDS v1.9.5: the boundary is the STORED anchor + interval. Here that anchor is always the
      * exhaustion anchor written by {@link KidsModeData#anchorCooldown(long)} (the early return
-     * in the body below requires an exhausted quota WITH the flag), so the gate opens exactly
-     * one interval after the quota ran out. A hand-edited or corrupted blob with a 0 anchor still
-     * recovers: the ROLLOVER_MIN_MS clamp fires the one-shot and {@link #onRolloverCheck()} treats
-     * anchor 0 as expired.
+     * in the body below requires an exhausted quota WITH the flag), so the one-shot fires
+     * exactly one interval after the quota ran out. A hand-edited or corrupted blob with a 0
+     * anchor still recovers: the ROLLOVER_MIN_MS clamp fires the one-shot and
+     * {@link #onRolloverCheck()} treats anchor 0 as expired. KIDS v1.15: the one-shot only
+     * records that the pause is over — the gate keeps its art until an escape press.
      *
      * KIDS v1.9.7: with the pause starting at exhaustion, an unspent quota has NO boundary at
      * all, and neither has an anchor the {@code inCooldown} flag does not vouch for (parent
@@ -898,6 +997,11 @@ public class KidsTimeUpLock {
         }
 
         long limitMs = KidsQuotaWindow.limitMs(data.getTimerMinutes(), data.getBonusMs());
+
+        if (isResetWindowDone(context)) {
+            Log.d(TAG, "Rollover check skipped: the pause already elapsed (the gate stays until an escape press)");
+            return;
+        }
 
         if (data.getUsedMs() < limitMs || !data.isInCooldown()) {
             // The quota was not reached yet, or no pause was anchored at exhaustion: the interval
@@ -927,14 +1031,13 @@ public class KidsTimeUpLock {
     }
 
     /**
-     * KIDS v1.9.4: the reset window has moved on — the gate then opens WITHOUT a PIN, so
-     * Back/Home work again. If the boundary shifted meanwhile (interval change, backwards
-     * clock jump) the window is not expired yet: re-schedule instead.
+     * KIDS v1.9.4: the reset window has moved on. If the boundary shifted meanwhile (interval
+     * change, backwards clock jump) the window is not expired yet: re-schedule instead.
      *
-     * KIDS v1.9.8: opening is a {@link #GATE_OPEN_CELEBRATION_MS} delayed second step
-     * ({@link #onOpenGate()}) so the mile marker car is seen reaching lamp 10, and kiosk
-     * mode no longer holds the gate shut after a reset. {@link #openResetGate(Context, Activity)}
-     * writes the fresh quota right before releasing.
+     * KIDS v1.15: the boundary OPENS NOTHING. The car stays parked at lamp 10 and the classic
+     * black gate stays black until an escape press writes the fresh quota
+     * ({@link openResetGate}) — the night art is not touched at all, it leaves by the mash +
+     * PIN or the 06:00 boundary ({@link #onMorningCheck}).
      */
     private static void onRolloverCheck() {
         if (!sLocked || !sQuotaGate) {
@@ -958,16 +1061,6 @@ public class KidsTimeUpLock {
             return;
         }
 
-        // KIDS v1.9.8: kiosk no longer keeps the gate shut after a reset (the v1.9.6 rule made a
-        // finished reset still cost ten presses and a PIN). Celebrate first so the car is seen
-        // reaching lamp 10, then open by itself; a key press during the celebration opens it at
-        // once (onKeyPress / onGuardEscapeKey). The window IS re-anchored when that happens, so
-        // nothing is insta-locked on the next play.
-        if (sOpenGatePending) {
-            return; // already scheduled: a resume must not restart the celebration countdown
-        }
-
-        sOpenGatePending = true;
-        Utils.postDelayed(sOpenGateTask, GATE_OPEN_CELEBRATION_MS);
+        Log.d(TAG, "Reset pause over: gate keeps the art until an escape press (scene=%s)", sScene);
     }
 }

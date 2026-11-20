@@ -613,6 +613,12 @@ public class KidsModeController extends BasePlayerController implements TickleMa
      * starts when the pause ends.
      */
     private void resetWindowIfNeeded() {
+        // KIDS v1.15: while a gate is on screen IT owns the reset boundary — the car stays parked at
+        // lamp 10 and the cat stays until the morning. A tickle must never drop the overlay by itself.
+        if (KidsTimeUpLock.isLocked()) {
+            return;
+        }
+
         long now = System.currentTimeMillis();
         int intervalMinutes = mKidsData.getResetIntervalMinutes();
 
