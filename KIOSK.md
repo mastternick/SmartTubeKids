@@ -957,7 +957,8 @@ callers left and was deleted.
 > `SmartTubeKids_32.80-kids-102_universal.apk`: `scheduleMorningCheck`, `onMorningCheck`,
 > `msUntilMorning`, `showPasswordSticky`, `dismissGatePrompt` present; `onOpenGate`,
 > `GATE_OPEN_CELEBRATION_MS`, `sOpenGateTask`, `sOpenGatePending` absent. Installed in place on the
-> box (`adb install -r`, previous `32.79-kids-99`) as `versionName=32.80-kids-102`;
+> box (`adb install -r`, previous `32.79-kids-99`); the box was then updated to the docs/header-only
+> build `32.80-kids-103` (same code as `32.80-kids-102`, comments/docs only), so `versionName=32.80-kids-103`;
 > `ACCESS_RESTRICTED_SETTINGS=allow`, `KioskKeyGuardService` enabled **and bound**, no FATAL in
 > logcat. **Device smoke of the new rules still PENDING** — the box is asleep in the night gate and
 > the parent opens it for the smoke.
